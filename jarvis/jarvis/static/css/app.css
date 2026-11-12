@@ -276,7 +276,7 @@ a.btn { text-decoration: none; }
 .mic-card.offline .mini-bars i { background: var(--dim); }
 .status-on { color: var(--gold); font-family: var(--mono); font-size: 0.88em; letter-spacing: 0.05em; }
 .status-off { color: var(--dim); font-family: var(--mono); font-size: 0.88em; letter-spacing: 0.05em; }
-.reco { display: grid; grid-template-columns: auto 1fr auto; gap: 22px; align-items: center; }
+.reco { display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center; }
 .reco .board { font-size: 1.12em; font-weight: 650; }
 .reco ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 0.84em; }
 .areas-list { display: flex; flex-direction: column; gap: 14px; }
@@ -347,16 +347,10 @@ body.live-mode.live-menu .topbar { transform: none; opacity: 1; pointer-events: 
 body.live-mode footer { opacity: 0; pointer-events: none; }
 body.live-mode main { padding: 0; }
 .live-page { position: fixed; inset: 0; z-index: 3; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
-.live-core { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; }
-.live-core .w { font-size: clamp(30px, 3.2vw, 68px); font-weight: 600; letter-spacing: 0.38em; padding-left: 0.38em; text-shadow: 0 0 24px rgba(0, 0, 0, 0.95); animation: title-glow 3.2s ease-in-out infinite; }
-.live-status { font-family: var(--mono); font-size: clamp(14px, 1.1vw, 22px); letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin-top: 8px; min-height: 1.4em; transition: color 0.3s; }
-.live-page[data-phase="connecting"] .live-status { color: var(--muted); }
-.live-page[data-phase="listening"] .live-status, .live-page[data-phase="followup"] .live-status { color: var(--gold-hi); animation: live-pulse 1.4s ease-in-out infinite; }
-.live-page[data-phase="thinking"] .live-status { animation: blink 1s ease-in-out infinite; }
-.live-lines { position: absolute; left: 50%; bottom: 13vh; transform: translateX(-50%); width: min(1100px, 86vw); text-align: center; pointer-events: none; }
-.live-heard { font-family: var(--mono); color: var(--text-2); font-size: clamp(15px, 1.2vw, 24px); letter-spacing: 0.02em; min-height: 1.5em; opacity: 0; }
-.live-reply { margin-top: 10px; font-size: clamp(20px, 1.9vw, 38px); font-weight: 550; line-height: 1.35; min-height: 1.4em; text-shadow: 0 0 22px rgba(0, 0, 0, 0.9); opacity: 0; }
-.live-heard.show, .live-reply.show { animation: line-in 0.6s var(--ease) forwards; }
+.live-version {
+  position: absolute; left: clamp(20px, 3vw, 56px); bottom: clamp(18px, 3vh, 44px); pointer-events: none;
+  font-family: var(--mono); font-size: 0.86em; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim);
+}
 .live-clock { position: absolute; right: clamp(20px, 3vw, 56px); bottom: clamp(18px, 3vh, 44px); text-align: right; pointer-events: none; }
 .live-clock .t { font-family: var(--mono); font-size: clamp(30px, 4.2vw, 84px); letter-spacing: 0.04em; color: var(--text); font-variant-numeric: tabular-nums; text-shadow: 0 0 26px rgba(242, 194, 27, 0.25); }
 .live-clock .d { font-family: var(--mono); font-size: clamp(12px, 0.95vw, 18px); letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); margin-top: 2px; }
@@ -368,7 +362,7 @@ body.live-mode main { padding: 0; }
 .live-notice.show { opacity: 1; pointer-events: auto; }
 .live-notice p { color: var(--text-2); margin: 10px 0 16px; }
 .live-panel {
-  position: absolute; left: clamp(20px, 3vw, 56px); bottom: clamp(18px, 3vh, 44px); width: min(320px, 70vw); display: flex; flex-direction: column; gap: 8px;
+  position: absolute; left: clamp(20px, 3vw, 56px); bottom: calc(clamp(18px, 3vh, 44px) + 36px); width: min(320px, 70vw); display: flex; flex-direction: column; gap: 8px;
   padding: 14px; border-radius: var(--radius); background: var(--panel-hi); border: 1px solid var(--line);
   opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity 0.4s, transform 0.4s var(--ease);
 }
@@ -415,8 +409,6 @@ body.live-menu .live-panel { opacity: 1; transform: none; pointer-events: auto; 
   0%, 100% { text-shadow: 0 0 12px rgba(242, 194, 27, 0.25); }
   50% { text-shadow: 0 0 26px rgba(242, 194, 27, 0.75); }
 }
-@keyframes line-in { from { opacity: 0; transform: translateY(10px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
-@keyframes live-pulse { 0%, 100% { opacity: 0.65; text-shadow: 0 0 6px rgba(255, 216, 77, 0.2); } 50% { opacity: 1; text-shadow: 0 0 18px rgba(255, 216, 77, 0.8); } }
 @keyframes bar-glow { 0%, 100% { filter: brightness(0.85); } 50% { filter: brightness(1.45); } }
 
 @media (max-width: 1180px) {

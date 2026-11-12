@@ -3,14 +3,6 @@ import { h } from "../dom.js";
 // Live: this device is microphone and speaker. The microphone is only open while this page is.
 const AREA_KEY = "jarvis.live.area";
 const MENU_MS = 6000;
-const STATUS = {
-  connecting: "Verbinde …",
-  idle: "Sag „Jarvis“",
-  listening: "Ich höre",
-  thinking: "Einen Moment",
-  speaking: "",
-  followup: "Noch etwas?",
-};
 
 export default function live(view, ctx) {
   const root = h("div", { class: "page live-page" });
@@ -19,15 +11,12 @@ export default function live(view, ctx) {
 
   const clockTime = h("div", { class: "t" });
   const clockDate = h("div", { class: "d" });
-  const status = h("div", { class: "live-status" }, "");
-  const heard = h("div", { class: "live-heard" });
-  const answer = h("div", { class: "live-reply" });
   const notice = h("div", { class: "live-notice" });
   const areaSelect = h("select", { class: "select" }, h("option", { value: "" }, "Kein Raum"));
   const panel = h("div", { class: "live-panel" }, h("span", { class: "label" }, "Raum für Sätze ohne Raumangabe"), areaSelect);
+  const version = document.querySelector("#foot-left");
   root.append(
-    h("div", { class: "live-core" }, h("div", { class: "w" }, "JARVIS"), status),
-    h("div", { class: "live-lines" }, heard, answer),
+    h("div", { class: "live-version" }, version ? version.textContent : "JARVIS OS"),
     h("div", { class: "live-clock" }, clockTime, clockDate),
     notice,
     panel,
@@ -66,15 +55,7 @@ export default function live(view, ctx) {
   function setPhase(next) {
     phase = next;
     root.dataset.phase = next;
-    status.textContent = STATUS[next] ?? "";
     ctx.livePhase(next === "connecting" ? "idle" : next);
-  }
-
-  function say(text, el) {
-    el.textContent = text || "";
-    el.classList.remove("show");
-    void el.offsetWidth;
-    if (text) el.classList.add("show");
   }
 
   function showNotice(content) {
@@ -196,19 +177,11 @@ export default function live(view, ctx) {
   function onMessage(msg) {
     if (msg.type === "state") {
       setPhase(msg.phase);
-      if (msg.phase === "idle") say("", heard);
-    } else if (msg.type === "heard") {
-      say(`„${msg.text}“`, heard);
-      say("", answer);
     } else if (msg.type === "reply") {
-      say(msg.text, answer);
       if (msg.audio) enqueue(msg.audio, true);
       else ws.send(JSON.stringify({ type: "played" }));
     } else if (msg.type === "announce") {
-      say(msg.text, answer);
       if (msg.audio) enqueue(msg.audio, false);
-    } else if (msg.type === "error") {
-      say(msg.text, answer);
     }
   }
 
@@ -266,7 +239,6 @@ export default function live(view, ctx) {
   document.addEventListener("visibilitychange", onVisible);
 
   setPhase("connecting");
-  status.textContent = "";
   start(false);
 
   return {

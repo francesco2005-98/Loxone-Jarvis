@@ -156,10 +156,8 @@ export default function micsPage(view, ctx) {
           "div",
           {},
           h("div", { class: "board" }, r.board),
-          h("div", { class: "muted small" }, r.reichelt.map((x) => `Reichelt ${x.article} · ${x.variant} (${x.note})`).join("  ·  ")),
           h("ul", {}, r.hints.map((t) => h("li", {}, t))),
         ),
-        h("div", { class: "notice", style: { "max-width": "320px" } }, r.warning),
       ),
     );
   }

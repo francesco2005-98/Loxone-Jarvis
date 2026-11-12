@@ -603,7 +603,6 @@ def build_router(house: House) -> APIRouter:
         session = LiveSession(house, ws.send_json)
         house.live_sessions.add(session)
         worker = asyncio.create_task(session.run(), name="live-voice")
-        house.events.log("voice", "Live-Modus gestartet", session.area.name)
         try:
             while True:
                 message = await ws.receive()
@@ -620,7 +619,6 @@ def build_router(house: House) -> APIRouter:
         finally:
             worker.cancel()
             house.live_sessions.discard(session)
-            house.events.log("voice", "Live-Modus beendet", session.area.name)
 
     @router.websocket("/live")
     async def live(ws: WebSocket) -> None:

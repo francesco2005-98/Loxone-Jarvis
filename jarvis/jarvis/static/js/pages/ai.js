@@ -23,7 +23,7 @@ export default function ai(view, ctx) {
       "div",
       { class: "provider" },
       h("div", { class: "badge-letter" }, "G"),
-      h("div", { style: { flex: "1" } }, h("div", { class: "row between" }, h("div", { class: "huge" }, "Gemini"), statePill), h("div", { class: "muted" }, "Multimodale Intelligenz · Google"), h("div", { class: "label", style: { "margin-top": "6px" } }, "Einziger Anbieter. Keine weiteren Konten.")),
+      h("div", { style: { flex: "1" } }, h("div", { class: "row between" }, h("div", { class: "huge" }, "Gemini"), statePill), h("div", { class: "muted" }, "Multimodale Intelligenz · Google")),
     ),
     h("hr", { class: "sep" }),
     h(

@@ -97,9 +97,7 @@ export default function overview(view, ctx) {
     sysLox.sub.textContent = connected ? `Miniserver · ${status.loxone.name || "Lokal"}` : status.loxone.error || "Miniserver";
     sysLox.el.classList.toggle("off", !connected);
     const allOk = connected && g.configured && !g.error && status.mics.online > 0;
-    leadEl.textContent = allOk
-      ? "Alle Systeme verbunden. Bereit für deinen nächsten Gedanken."
-      : "Noch nicht alle Systeme verbunden. Die Seiten KI, Mikrofone und Loxone führen dich durch.";
+    leadEl.textContent = allOk ? "Alle Systeme verbunden. Bereit für deinen nächsten Gedanken." : "";
     countUp(stResponse.value, status.response_ms ?? "–");
     countUp(stRooms.value, status.counts.rooms);
     countUp(stActions.value, status.counts.allowed);
@@ -153,7 +151,6 @@ export default function overview(view, ctx) {
       item("Tokens ein", u.input_tokens),
       item("Tokens aus", u.output_tokens),
       item("Suchanfragen", u.search_queries, `/ ${Number(u.free_searches).toLocaleString("de-DE")} frei`),
-      h("div", { class: "hint", style: { "align-self": "center" } }, "Wird nur angezeigt. Ein volles Kontingent schaltet nichts ab."),
     );
   }
 
