@@ -320,8 +320,109 @@ class AudioserverClient:
         await self.ensure_ready()
         await self._command(f"audio/{player}/roomfav/play/{slot}", "roomfav_result")
 
+    async def services(self) -> list[dict]:
+        await self.ensure_ready()
+        result = await self._command("audio/cfg/getservices", "getservices_result")
+        return service_accounts(result)
+
+    async def search_service(self, service: str, user: str, query: str, *, kind: str = "playlist", limit: int = 8) -> list[dict]:
+        await self.ensure_ready()
+        command, key = search_command(service, user, query, kind=kind, limit=limit)
+        result = await self._command(command, key, timeout=15)
+        return search_items(result)
+
+    async def play_service(self, player: int, service: str, user: str, audiopath: str) -> None:
+        await self.ensure_ready()
+        command, key = serviceplay_command(player, service, user, audiopath)
+        result = await self._command(command, key, timeout=15)
+        if result is False:
+            raise AudioserverError("Der Audioserver hat die Wiedergabe abgelehnt")
+
     def event_active(self, player: int) -> bool:
         return bool(self._event_active.get(player))
+
+
+def search_command(service: str, user: str, query: str, *, kind: str = "playlist", limit: int = 8) -> tuple[str, str]:
+    safe_kind = kind if kind in ("playlist", "track", "album", "artist") else "playlist"
+    return (
+        "audio/cfg/search/{service}/{user}/{kind}/{query}/{limit}/0".format(
+            service=quote(service, safe=""),
+            user=quote(user, safe=""),
+            kind=safe_kind,
+            query=quote(query.strip(), safe=""),
+            limit=max(1, min(20, int(limit))),
+        ),
+        "search_result",
+    )
+
+
+def serviceplay_command(player: int, service: str, user: str, audiopath: str) -> tuple[str, str]:
+    return (
+        f"audio/{int(player)}/serviceplay/{quote(service, safe='')}/{quote(user, safe='')}/{quote(audiopath, safe='')}",
+        "serviceplay_result",
+    )
+
+
+def service_accounts(result: object) -> list[dict]:
+    """Spotify (and other) accounts configured on the Audioserver."""
+    found: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            label = " ".join(str(node.get(key, "")) for key in ("service", "name", "type", "cmd", "id")).lower()
+            user = node.get("user") or node.get("uid") or node.get("username") or node.get("account")
+            service = "spotify" if "spotify" in label else ""
+            if service and user:
+                item = (service, str(user))
+                if item not in seen:
+                    seen.add(item)
+                    found.append({"service": service, "user": str(user), "name": str(node.get("name") or "Spotify")})
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(result)
+    return found
+
+
+def search_items(result: object) -> list[dict]:
+    """Playable hits, playlists first."""
+    found: list[dict] = []
+    seen: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            path = node.get("audiopath") or node.get("path") or node.get("uri") or node.get("id")
+            name = node.get("name") or node.get("title")
+            if isinstance(path, str) and name and ":" in path and path not in seen:
+                seen.add(path)
+                found.append(
+                    {
+                        "name": str(name),
+                        "path": path,
+                        "playlist": _is_playlist(node, path),
+                        "user": str(node.get("user") or ""),
+                    }
+                )
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(result)
+    playlists = [item for item in found if item["playlist"]]
+    return playlists or found
+
+
+def _is_playlist(node: dict, path: str) -> bool:
+    kind = str(node.get("type") if node.get("type") is not None else node.get("audiotype") or "").lower()
+    if "playlist" in kind or "playlist" in path.lower():
+        return True
+    return kind in {"2", "3", "7", "11", "13"}
 
 
 def _favorite_items(result: object) -> list[dict]:

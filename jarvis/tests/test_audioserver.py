@@ -8,7 +8,15 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from jarvis.audio import wav
-from jarvis.audio.audioserver import Announcement, AudioserverClient, build_authenticate
+from jarvis.audio.audioserver import (
+    Announcement,
+    AudioserverClient,
+    build_authenticate,
+    search_command,
+    search_items,
+    service_accounts,
+    serviceplay_command,
+)
 
 
 def test_authenticate_command_decrypts_to_jwt():
@@ -66,3 +74,27 @@ def test_wav_pipeline_resamples_and_pads():
     assert data[:4] == b"RIFF"
     back = wav.decode(data)
     assert back.rate == 24000 and back.samples.size == out.samples.size
+
+
+def test_spotify_search_and_play_commands():
+    command, key = search_command("spotify", "luca@home", "Jazz", kind="playlist", limit=8)
+    assert key == "search_result"
+    assert command == "audio/cfg/search/spotify/luca%40home/playlist/Jazz/8/0"
+    play, play_key = serviceplay_command(3, "spotify", "luca@home", "spotify:playlist:abc")
+    assert play_key == "serviceplay_result"
+    assert play == "audio/3/serviceplay/spotify/luca%40home/spotify%3Aplaylist%3Aabc"
+
+
+def test_spotify_accounts_and_playlists_are_parsed():
+    accounts = service_accounts(
+        {"getservices_result": [{"service": "spotify", "user": "luca", "name": "Spotify"}, {"service": "tunein", "user": "x"}]}
+    )
+    assert accounts == [{"service": "spotify", "user": "luca", "name": "Spotify"}]
+    items = search_items(
+        {
+            "tracks": {"items": [{"title": "So What", "audiopath": "spotify:track:1", "type": "track"}]},
+            "playlists": {"items": [{"name": "Jazz Classics", "audiopath": "spotify:playlist:abc", "type": 3, "user": "luca"}]},
+        }
+    )
+    assert items[0]["name"] == "Jazz Classics"
+    assert items[0]["path"] == "spotify:playlist:abc"
