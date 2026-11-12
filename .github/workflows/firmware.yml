@@ -1,0 +1,78 @@
+name: Firmware
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: firmware
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install ESPHome
+        run: pip install "esphome==2026.10.2"
+      - name: Cache ESPHome toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.esphome
+            firmware/.esphome
+          key: esphome-2026.10.2-${{ hashFiles('firmware/jarvis-mic.yaml') }}
+          restore-keys: esphome-2026.10.2-
+      - name: Validate
+        run: esphome config firmware/jarvis-mic.yaml > /dev/null
+      - name: Compile
+        run: esphome compile firmware/jarvis-mic.yaml
+      - name: Collect images
+        run: |
+          set -euo pipefail
+          factory=$(find firmware/.esphome/build -name 'firmware.factory.bin' | head -n1)
+          ota=$(find firmware/.esphome/build -name 'firmware.ota.bin' | head -n1)
+          test -n "$factory" && test -n "$ota"
+          out=jarvis/jarvis/static/firmware
+          mkdir -p "$out"
+          cp "$factory" "$out/jarvis-mic.factory.bin"
+          cp "$ota" "$out/jarvis-mic.ota.bin"
+          version=$(grep -E '^\s+version: "' firmware/jarvis-mic.yaml | head -n1 | sed -E 's/.*"(.*)".*/\1/')
+          md5=$(md5sum "$out/jarvis-mic.ota.bin" | cut -d' ' -f1)
+          cat > "$out/manifest.json" <<EOF
+          {
+            "version": "$version",
+            "esphome": "2026.10.2",
+            "factory": "jarvis-mic.factory.bin",
+            "ota": "jarvis-mic.ota.bin",
+            "ota_md5": "$md5",
+            "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit": "${GITHUB_SHA}"
+          }
+          EOF
+          sed -i 's/^          //' "$out/manifest.json"
+          cat "$out/manifest.json"
+          ls -l "$out"
+      - name: Commit images
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jarvis/jarvis/static/firmware
+          if git diff --cached --quiet; then echo "unchanged"; exit 0; fi
+          git commit -m "Firmware-Abbild aus ${GITHUB_SHA::7} [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1

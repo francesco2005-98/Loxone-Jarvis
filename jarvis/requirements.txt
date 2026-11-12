@@ -1,0 +1,13 @@
+fastapi==0.162.5
+uvicorn[standard]==0.54.0
+pydantic==2.14.3
+cryptography==50.0.2
+argon2-cffi==25.1.0
+aiohttp==3.14.5
+aioesphomeapi==46.30.0
+google-genai==3.2.0
+mcp==2.3.0
+faster-whisper==1.2.1
+sherpa-onnx==2.0.1
+numpy>=2.0,<3
+tzdata==2026.6

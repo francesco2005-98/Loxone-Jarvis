@@ -1,0 +1,229 @@
+# Jarvis microphone for the Seeed XIAO ESP32-S3 Sense (Reichelt 406873 / 358353).
+# Built by GitHub Actions into jarvis/jarvis/static/firmware and flashed from the browser.
+# The board only hears the wake word and streams the sentence after it to Jarvis.
+# Camera, SD card and Bluetooth stay off. No credentials for Loxone or Gemini live here.
+
+substitutions:
+  name: jarvis-mic
+  friendly_name: Jarvis Mikrofon
+  version: "1.0.0"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: true
+  min_version: 2026.7.0
+  project:
+    name: loxone-jarvis.xiao-sense-mic
+    version: ${version}
+
+esp32:
+  board: seeed_xiao_esp32s3
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+  level: INFO
+
+wifi:
+  power_save_mode: none
+  on_connect:
+    - script.execute: announce_to_server
+
+improv_serial:
+  next_url: "http://{{ip_address}}/?name={{device_name}}"
+
+api:
+  encryption: {}
+  reboot_timeout: 0s
+  actions:
+    - action: listen
+      then:
+        - micro_wake_word.stop:
+        - voice_assistant.start:
+    - action: set_server_url
+      variables:
+        server_url: string
+      then:
+        - globals.set:
+            id: g_server_url
+            value: !lambda return server_url;
+        - script.execute: announce_to_server
+    - action: ota_update
+      variables:
+        url: string
+        md5sum: string
+      then:
+        - micro_wake_word.stop:
+        - voice_assistant.stop:
+        - ota.http_request.flash:
+            url: !lambda return url;
+            md5: !lambda return md5sum;
+
+ota:
+  - platform: http_request
+
+http_request:
+  verify_ssl: false
+  timeout: 10s
+
+globals:
+  - id: g_server_url
+    type: std::string
+    restore_value: true
+    max_restore_data_length: 128
+    initial_value: '""'
+
+output:
+  - platform: gpio
+    id: user_led
+    pin:
+      number: GPIO21
+      inverted: true
+
+i2s_audio:
+  - id: i2s_mic_bus
+    i2s_lrclk_pin: GPIO42
+
+microphone:
+  - platform: i2s_audio
+    id: xiao_mic
+    i2s_audio_id: i2s_mic_bus
+    adc_type: external
+    pdm: true
+    i2s_din_pin: GPIO41
+    channel: left
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    correct_dc_offset: true
+
+micro_wake_word:
+  id: mww
+  microphone:
+    microphone: xiao_mic
+    channels: 0
+    gain_factor: 4
+  stop_after_detection: true
+  vad:
+  models:
+    - model: hey_jarvis
+      id: hey_jarvis
+  on_wake_word_detected:
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
+
+voice_assistant:
+  id: va
+  micro_wake_word: mww
+  microphone:
+    microphone: xiao_mic
+    channels: 0
+    gain_factor: 4
+  use_wake_word: false
+  on_client_connected:
+    - delay: 1s
+    - script.execute: start_wake_word
+  on_client_disconnected:
+    - micro_wake_word.stop:
+    - output.turn_off: user_led
+  on_listening:
+    - output.turn_on: user_led
+  on_stt_vad_end:
+    - output.turn_off: user_led
+  on_end:
+    - output.turn_off: user_led
+    - script.execute: start_wake_word
+  on_error:
+    - output.turn_off: user_led
+    - script.execute: start_wake_word
+
+script:
+  - id: start_wake_word
+    mode: restart
+    then:
+      - wait_until:
+          condition:
+            not:
+              - voice_assistant.is_running:
+          timeout: 3s
+      - if:
+          condition:
+            and:
+              - switch.is_on: wake_word_enabled
+              - voice_assistant.connected:
+              - not:
+                  - micro_wake_word.is_running:
+          then:
+            - micro_wake_word.start:
+  - id: announce_to_server
+    mode: restart
+    then:
+      - if:
+          condition:
+            and:
+              - wifi.connected:
+              - lambda: return !id(g_server_url).empty();
+          then:
+            - http_request.post:
+                url: !lambda return id(g_server_url) + "/device/hello";
+                request_headers:
+                  Content-Type: application/json
+                json: !lambda |-
+                  char ip[network::IP_ADDRESS_BUFFER_SIZE] = "";
+                  for (auto &addr : network::get_ip_addresses()) {
+                    if (addr.is_ip4()) { addr.str_to(ip); break; }
+                  }
+                  root["name"] = App.get_name().str();
+                  root["ip"] = std::string(ip);
+                  root["esphome_version"] = std::string(ESPHOME_VERSION);
+
+interval:
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            not:
+              - api.connected:
+          then:
+            - script.execute: announce_to_server
+
+switch:
+  - platform: template
+    id: wake_word_enabled
+    name: Wake word enabled
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+    on_turn_on:
+      - script.execute: start_wake_word
+    on_turn_off:
+      - micro_wake_word.stop:
+
+number:
+  - platform: template
+    id: wake_word_sensitivity
+    name: Wake word sensitivity
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    min_value: 0
+    max_value: 100
+    step: 1
+    entity_category: config
+    on_value:
+      - lambda: |-
+          float s = x;
+          float cutoff = s <= 50 ? 250.0f - 0.3f * s : 235.0f - 0.6f * (s - 50.0f);
+          id(hey_jarvis).set_probability_cutoff((uint8_t) cutoff);
+
+button:
+  - platform: factory_reset
+    id: factory_reset_button
+    name: Factory reset
