@@ -59,14 +59,14 @@ a { color: var(--gold); }
 .vignette::before {
   content: ""; position: absolute; left: 0; right: 0; height: 22%;
   background: linear-gradient(to bottom, transparent, rgba(242, 194, 27, 0.05), transparent);
-  animation: scan 9s linear infinite;
+  animation: scan 16s linear infinite;
 }
 .vignette::after {
   content: ""; position: absolute; inset: -20%; mix-blend-mode: screen; opacity: 0.55;
   background:
     radial-gradient(38% 30% at 22% 28%, rgba(242, 194, 27, 0.07), transparent 70%),
     radial-gradient(34% 28% at 80% 72%, rgba(255, 216, 77, 0.06), transparent 70%);
-  animation: aurora 26s ease-in-out infinite alternate;
+  animation: aurora 46s ease-in-out infinite alternate;
 }
 
 /* ------------------------------------------------------------------ shell */

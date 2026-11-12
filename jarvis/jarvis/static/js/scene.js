@@ -258,6 +258,9 @@ function view(pitch, height) {
   return multiply(rot, trans);
 }
 
+// Global tempo of the background motion; globe placement and level response stay unscaled.
+const TEMPO = 0.55;
+
 const RESTING = { listening: 0.62, collecting: 0.62, followup: 0.4, thinking: 0.48, speaking: 0.9 };
 
 const gold = (a) => `rgba(242, 194, 27, ${a})`;
@@ -455,14 +458,14 @@ export class Scene {
     const dt = Math.min(0.05, Math.max(0, raw));
     this.last = now;
     this.frame = requestAnimationFrame((t) => this.loop(t));
-    this.time += dt;
+    this.time += dt * TEMPO;
     const k = 1 - Math.exp(-dt * 2.6);
     for (const key of ["x", "y", "r", "alpha"]) this.globe[key] += (this.target[key] - this.globe[key]) * k;
     this.energy += (this.energyTarget - this.energy) * (1 - Math.exp(-dt * 4));
     const resting = RESTING[this.phase] ?? 0.22;
     this.energyTarget += (resting - this.energyTarget) * (1 - Math.exp(-dt * 1.5));
-    this.rot += dt * (0.28 + this.energy * 0.55);
-    this.pulse += dt * (0.16 + this.energy * 0.24);
+    this.rot += dt * TEMPO * (0.28 + this.energy * 0.55);
+    this.pulse += dt * TEMPO * (0.16 + this.energy * 0.24);
     this.adapt(raw);
     if (this.mode === "gl") this.draw();
     else this.draw2d();
