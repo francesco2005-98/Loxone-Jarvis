@@ -33,6 +33,7 @@ class Turn:
     lang: str
     text: str
     person_id: str | None = None
+    origin: str = ""
     pending: Pending | None = None
     final_text: str | None = None
     done: list[str] = field(default_factory=list)
@@ -312,6 +313,7 @@ class ToolRunner:
             text=str(args.get("message") or ""),
             bereich_id=turn.area.id,
             lang=turn.lang,
+            origin=turn.origin,
         )
         turn.done.append(f"{kind} {timer['label']}")
         return {"ok": True, "due": timers.describe(timer)}

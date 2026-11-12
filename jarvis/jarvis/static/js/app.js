@@ -5,14 +5,16 @@ import overview from "./pages/overview.js";
 import ai from "./pages/ai.js";
 import mics from "./pages/mics.js";
 import loxone from "./pages/loxone.js";
+import livePage from "./pages/live.js";
 
 const PAGES = {
   overview: { module: overview, hash: "uebersicht", footer: "01 / NEURAL COMMAND CENTER" },
   ai: { module: ai, hash: "ki", footer: "02 / INTELLIGENCE ENGINE" },
   mics: { module: mics, hash: "mikrofone", footer: "03 / VOICE IS THE INTERFACE" },
   loxone: { module: loxone, hash: "loxone", footer: "04 / CONNECTED TO YOUR WORLD" },
+  live: { module: livePage, hash: "live", footer: "05 / LIVE" },
 };
-const ORDER = ["overview", "ai", "mics", "loxone"];
+const ORDER = ["overview", "ai", "mics", "loxone", "live"];
 const PHASE_RANK = { speaking: 5, listening: 4, collecting: 4, thinking: 3, followup: 2, idle: 0 };
 
 const live = new Live();
@@ -21,6 +23,7 @@ let scene;
 let current = null;
 let entered = false;
 let routeToken = 0;
+let livePhase = null;
 const LEAVE_MS = 260;
 
 const ctx = {
@@ -32,6 +35,13 @@ const ctx = {
     location.hash = PAGES[id].hash;
   },
   placeGlobe: (x, y, r, alpha, instant) => scene && scene.setGlobe(x, y, r, alpha, instant),
+  // The Live page drives the globe itself while it is open; null hands it back to the house.
+  livePhase: (phase) => {
+    livePhase = phase;
+    if (scene) scene.setPhase(phase ?? dominantPhase());
+  },
+  liveLevel: (level) => scene && scene.level(level),
+  httpsPort: null,
   phases,
 };
 
@@ -61,16 +71,16 @@ function setStatus(status) {
   pill.className = `pill ${ok ? "live" : "dim"}`;
   $("#system-text").textContent = ok ? "System online" : "Eingeschränkt";
   for (const [area, phase] of Object.entries(status.phases || {})) phases[area] = phase;
-  scene.setPhase(dominantPhase());
+  if (!livePhase) scene.setPhase(dominantPhase());
 }
 
 function onLive(msg) {
   if (msg.type === "hello" || msg.type === "status") setStatus(msg.status);
   if (msg.type === "phase") {
     phases[msg.area] = msg.phase;
-    scene.setPhase(dominantPhase());
+    if (!livePhase) scene.setPhase(dominantPhase());
   }
-  if (msg.type === "level") scene.level(msg.level);
+  if (msg.type === "level" && !livePhase) scene.level(msg.level);
   if (current && current.instance.onLive) current.instance.onLive(msg);
 }
 
@@ -90,7 +100,7 @@ async function route() {
   moveUnderline(document.querySelector(`#nav button[data-page="${id}"]`));
   $("#foot-center").textContent = PAGES[id].footer;
   $("#foot-progress").style.setProperty("width", `${((ORDER.indexOf(id) + 1) / ORDER.length) * 100}%`);
-  if (id !== "overview") backgroundGlobe();
+  if (id !== "overview" && id !== "live") backgroundGlobe();
   const leaving = current;
   current = null;
   if (leaving) {
@@ -193,6 +203,7 @@ async function boot() {
   }
   $("#gate-version").textContent = `JARVIS OS ${session.version || ""}`;
   $("#foot-left").textContent = `JARVIS OS / ${session.version || ""}`;
+  ctx.httpsPort = session.https_port || null;
   if (session.authenticated) enter(true);
   else showGate(session.setup_required);
 }

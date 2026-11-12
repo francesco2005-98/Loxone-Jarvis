@@ -280,17 +280,17 @@ class Coordinator:
             self._phase(area_id)
 
     async def handle_text(
-        self, session: AreaSession, area: Area, text: str, lang: str, person_id: str | None
+        self, session: AreaSession, area: Area, text: str, lang: str, person_id: str | None, origin: str = ""
     ) -> tuple[str, list[str]]:
         if session.pending is not None:
             pending: Pending = session.pending  # type: ignore[assignment]
             session.pending = None
             answer = confirm.classify(text)
             if answer == confirm.Answer.YES:
-                return await self._confirmed(pending, session, area, lang, person_id)
+                return await self._confirmed(pending, session, area, lang, person_id, origin)
             if answer == confirm.Answer.NO:
                 return ("Abgebrochen." if lang == "de" else "Cancelled."), []
-        turn = Turn(area=area, lang=lang, text=text, person_id=person_id)
+        turn = Turn(area=area, lang=lang, text=text, person_id=person_id, origin=origin)
         try:
             reply, history = await self.house.brain.answer(turn, session.history)
             session.history = history
@@ -302,9 +302,9 @@ class Coordinator:
         return reply, turn.done
 
     async def _confirmed(
-        self, pending: Pending, session: AreaSession, area: Area, lang: str, person_id: str | None
+        self, pending: Pending, session: AreaSession, area: Area, lang: str, person_id: str | None, origin: str = ""
     ) -> tuple[str, list[str]]:
-        turn = Turn(area=area, lang=lang, text="ja", person_id=person_id)
+        turn = Turn(area=area, lang=lang, text="ja", person_id=person_id, origin=origin)
         if pending.kind == "control":
             results = []
             for entry, action, value, value2 in pending.actions:

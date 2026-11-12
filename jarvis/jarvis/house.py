@@ -66,6 +66,7 @@ class House:
         self.brain.runner.config_task = self.config_agent.run
         self._tasks: set[asyncio.Task] = set()
         self._favorites: dict[int, tuple[float, list[dict]]] = {}
+        self.live_sessions: set = set()
         self.started_at = time.time()
         self.settings.on_change(self._settings_changed)
 
@@ -220,9 +221,14 @@ class House:
             message = f"Erinnerung: {text}" if lang == "de" else f"Reminder: {text}"
         else:
             message = f"Der Timer {label} ist abgelaufen." if lang == "de" else f"Your {label} timer is done."
+        self.events.log("timer", message)
+        if timer.get("origin") == "live":
+            browsers = [s for s in self.live_sessions if s.area.id == timer.get("bereich_id")]
+            if browsers:
+                await asyncio.gather(*(s.announce(message, lang) for s in browsers), return_exceptions=True)
+                return
         area = self.areas.get(timer.get("bereich_id"))
         areas = [area] if area else [a for a in self.areas.list() if a.zone_uuid]
-        self.events.log("timer", message)
         await self.speech.say(message, lang, areas)
 
     # -------------------------------------------------------------- devices

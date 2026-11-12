@@ -7,12 +7,13 @@ Sprachassistent mit Jarvis-Persönlichkeit für ein Loxone-Haus. Wakeword-Mikrof
 - **Denken:** Gemini (Standard `gemini-3.8-flash`, im Drop-down wählbar) mit den freigegebenen Bausteinen. Google-Suche nur bei offenen Fragen.
 - **Handeln:** Miniserver über die Websocket-Schnittstelle, nur freigegebene Bausteine. Alarm, Schloss und Garage erst nach gesprochenem „Ja“. „Spiel Jazz im Wohnzimmer“ sucht am Audioserver eine Spotify-Playlist und startet sie in der Zone. Spotify muss dort angemeldet sein.
 - **Sprechen:** Piper lokal, als Durchsage über den Audioserver. Musik läuft danach weiter.
+- **Live:** Menüpunkt „Live“ auf Tablet oder Handy. Nur Hintergrund und Uhr, Jarvis hört über das Mikrofon des Geräts auf „Jarvis“ und antwortet über dessen Lautsprecher, nicht über den Audioserver. Das Mikrofon ist nur offen, solange Live geöffnet ist. Tippen blendet das Menü ein.
 
 ## Aufbau
 
 | Dienst | Aufgabe | Port |
 |---|---|---|
-| `jarvis` | Oberfläche, Mikrofone, Erkennung, Gemini, Loxone, Audioserver, Config-MCP | 8500 (direkt `http://<Server>:8500`, optional HTTPS über eine Domain), 8765 (nur für die Mikrofone im Hausnetz) |
+| `jarvis` | Oberfläche, Mikrofone, Erkennung, Gemini, Loxone, Audioserver, Config-MCP | 8500 (direkt `http://<Server>:8500`, optional HTTPS über eine Domain), 8501 (HTTPS mit eigenem Zertifikat für Live), 8765 (nur für die Mikrofone im Hausnetz) |
 | `piper` | Sprachausgabe, nur intern | 5000 |
 
 Daten liegen im Volume `jarvis-data` (SQLite). Zugangsdaten sind dort mit AES-GCM verschlüsselt, der Schlüssel kommt aus `JARVIS_SECRET_KEY` und liegt nur in Coolify.
@@ -35,6 +36,7 @@ Jarvis antwortet nur Adressen aus privaten Netzen, auch hinter dem Coolify-Proxy
 4. **Pair:** Board per USB an den Rechner mit Chrome oder Edge, „Pair“. Über `http://<IP>:8500` lädt die Seite einmal `jarvis-pair.py`. Das Programm mit `python3 jarvis-pair.py` starten (Windows: `py -3 jarvis-pair.py`). Es öffnet eine lokale Seite, schreibt die Firmware, übergibt das WLAN, und Jarvis setzt einen eigenen Schlüssel. Danach USB ab, Board an ein USB-C-Netzteil im Raum, Bereich zuordnen.
 5. **Übersicht:** Personen mit Anrede (Name, Sir, Mam) und Notizen anlegen, optional Stimmprofil mit drei Sätzen aufnehmen. Notizen des Haushalts und Zeitzone.
 6. Optional **Loxone Config · MCP:** In Config den MCP-Server in der Titelleiste einschalten und die Adresse eintragen. Dann legt Jarvis neue Logik an, nach Ansage und „Ja“. Bietet Config ein Werkzeug zum Speichern auf den Miniserver an, nutzt Jarvis es, sonst bleibt die Änderung im offenen Projekt.
+7. Optional **Live auf Tablet oder Handy:** `https://<IP-des-Servers>:8501/#live` öffnen, die Zertifikatswarnung einmal bestätigen („Erweitert“ → „Weiter“), anmelden und das Mikrofon erlauben. Browser geben das Mikrofon nur über HTTPS frei, darum der zweite Port. Danach „Jarvis, …“ sagen. Im Menü (Tippen) lässt sich ein Raum für Sätze ohne Raumangabe wählen. Timer und Erinnerungen aus Live klingeln auf dem Gerät, solange Live offen ist, sonst über den Audioserver.
 
 ## Mikrofon kaufen
 

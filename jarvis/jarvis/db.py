@@ -93,6 +93,10 @@ SCHEMA = [
         search_queries INTEGER NOT NULL DEFAULT 0
     );
     """,
+    # version 2: timers set from the Live page ring on that browser
+    """
+    ALTER TABLE timers ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 

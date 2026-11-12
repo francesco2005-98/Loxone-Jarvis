@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from .people import ENROLL_SENTENCES
 from .crypto import new_token
 from .security import SESSION_COOKIE, SESSION_TTL, LoginLimiter
 from .settings import SECRET_KEYS, SettingsError
+from .voice.live import LiveSession
 from .voice.mics import PairError
 
 RECOMMENDATION = {
@@ -136,6 +138,7 @@ def build_router(house: House) -> APIRouter:
             "authenticated": house.auth.session_valid(request.cookies.get(SESSION_COOKIE)),
             "setup_required": not house.auth.has_password(),
             "version": __version__,
+            "https_port": house.config.https_port or None,
         }
 
     @router.post("/setup")
@@ -584,13 +587,44 @@ def build_router(house: House) -> APIRouter:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------- live
-    @router.websocket("/live")
-    async def live(ws: WebSocket) -> None:
+    def ws_allowed(ws: WebSocket) -> bool:
         origin = ws.headers.get("origin", "")
         host = ws.headers.get("host", "")
-        if not house.auth.session_valid(ws.cookies.get(SESSION_COOKIE)) or (
+        return house.auth.session_valid(ws.cookies.get(SESSION_COOKIE)) and not (
             origin and origin.split("://", 1)[-1] != host
-        ):
+        )
+
+    @router.websocket("/live/voice")
+    async def live_voice(ws: WebSocket) -> None:
+        if not ws_allowed(ws):
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        session = LiveSession(house, ws.send_json)
+        house.live_sessions.add(session)
+        worker = asyncio.create_task(session.run(), name="live-voice")
+        house.events.log("voice", "Live-Modus gestartet", session.area.name)
+        try:
+            while True:
+                message = await ws.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+                if message.get("bytes"):
+                    session.feed(message["bytes"])
+                elif message.get("text"):
+                    data = json.loads(message["text"])
+                    if isinstance(data, dict):
+                        await session.command(data)
+        except (WebSocketDisconnect, RuntimeError, ValueError):
+            pass
+        finally:
+            worker.cancel()
+            house.live_sessions.discard(session)
+            house.events.log("voice", "Live-Modus beendet", session.area.name)
+
+    @router.websocket("/live")
+    async def live(ws: WebSocket) -> None:
+        if not ws_allowed(ws):
             await ws.close(code=1008)
             return
         await ws.accept()

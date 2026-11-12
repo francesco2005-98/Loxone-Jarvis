@@ -53,6 +53,7 @@ class TimerService:
         text: str,
         bereich_id: str | None,
         lang: str,
+        origin: str = "",
     ) -> dict:
         if due_at <= time.time():
             raise ValueError("Zeitpunkt liegt in der Vergangenheit")
@@ -60,9 +61,9 @@ class TimerService:
             raise ValueError("höchstens ein Jahr im Voraus")
         timer_id = uuid.uuid4().hex[:12]
         self._db.execute(
-            "INSERT INTO timers(id, kind, label, text, due_at, bereich_id, lang, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?)",
-            (timer_id, kind, label[:80], text[:300], due_at, bereich_id, lang, time.time()),
+            "INSERT INTO timers(id, kind, label, text, due_at, bereich_id, lang, origin, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (timer_id, kind, label[:80], text[:300], due_at, bereich_id, lang, origin, time.time()),
         )
         self._wake.set()
         return self.get(timer_id) or {}
