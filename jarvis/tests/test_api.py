@@ -79,6 +79,40 @@ def test_pair_requires_house_address(client):
     assert client.post("/api/mics/pair", json={"ip": "8.8.8.8", "name": "jarvis-mic-abc123"}, headers=H).status_code == 400
 
 
+def test_local_pair_helper_works_without_https(client, house, tmp_path):
+    import py_compile
+    import re
+
+    assert client.get("/api/mics/pair/helper").status_code == 401
+    login(client)
+    assert client.put("/api/secrets", json={"key": "mics.wifi_password", "value": "wlan-geheim"}, headers=H).status_code == 200
+    script = client.get("/api/mics/pair/helper", headers=H)
+    assert script.status_code == 200
+    assert script.headers["content-disposition"].endswith('filename="jarvis-pair.py"')
+    text = script.text
+    assert "testserver" in text
+    assert "wlan-geheim" not in text
+    path = tmp_path / "jarvis-pair.py"
+    path.write_text(text, encoding="utf-8")
+    py_compile.compile(str(path), doraise=True)
+    token = re.search(r'TOKEN = "([^"]+)"', text).group(1)
+    assert client.get(f"/api/mics/pair/helper/{token}").json()["wifi_password"] == "wlan-geheim"
+    assert client.get("/api/mics/pair/helper/falsch").status_code == 401
+
+    async def fake_pair(ip, name):
+        return type("Mic", (), {"public": lambda self: {"id": "m1", "name": name, "host": ip}})()
+
+    house.mics.pair = fake_pair
+    paired = client.post(
+        f"/api/mics/pair/helper/{token}",
+        headers=H,
+        json={"ip": "192.168.1.40", "name": "jarvis-mic-abc123"},
+    )
+    assert paired.status_code == 200
+    assert paired.json()["host"] == "192.168.1.40"
+    assert client.get(f"/api/mics/pair/helper/{token}").status_code == 401
+
+
 def test_http_port_defaults_to_8500(env):
     from jarvis.config import Config
 

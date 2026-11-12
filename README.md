@@ -21,7 +21,7 @@ Daten liegen im Volume `jarvis-data` (SQLite). Zugangsdaten sind dort mit AES-GC
 
 1. Neue Ressource → **Docker Compose** → dieses GitHub-Repo, Branch `main`, Datei `docker-compose.yml`.
 2. Umgebungsvariable `JARVIS_SECRET_KEY` als Secret setzen, zum Beispiel aus `openssl rand -base64 48`. Den Wert aufbewahren: ohne ihn lassen sich die gespeicherten Zugänge nicht mehr entschlüsseln.
-3. Keine Domain nötig. Nach dem Deploy die Oberfläche im Hausnetz unter `http://<IP-des-Servers>:8500` öffnen. Eine Domain mit HTTPS ist nur für Pair (USB-Flash im Browser) nötig, zum Beispiel `https://jarvis.example.lan`.
+3. Keine Domain nötig. Nach dem Deploy die Oberfläche im Hausnetz unter `http://<IP-des-Servers>:8500` öffnen. Pair über USB funktioniert dort ebenfalls.
 4. Deployen. Der erste Bau lädt Whisper-Modelle, das Sprechermodell und die Piper-Stimmen in die Images (einige Minuten, danach braucht der Betrieb kein Internet außer Gemini).
 5. Die Seite öffnen und das Oberflächen-Passwort festlegen (mindestens 10 Zeichen).
 
@@ -32,7 +32,7 @@ Jarvis antwortet nur Adressen aus privaten Netzen, auch hinter dem Coolify-Proxy
 1. **KI:** Gemini-API-Schlüssel aus Google AI Studio setzen, Modell wählen, „Verbindung prüfen“. Stimmen für Deutsch und Englisch wählen.
 2. **Loxone:** In Loxone Config einen Benutzer `jarvis` **ohne Admin-Recht** anlegen, mit Zugriff auf die Räume und Bausteine, die Jarvis schalten soll. Adresse, Benutzer und Passwort eintragen, „Verbinden“. Danach in der Topologie Bausteine freigeben und Sprechweisen ergänzen. Der Audioserver wird aus dem Miniserver erkannt.
 3. **Mikrofone:** WLAN (2,4 GHz) und die Adresse des Mini-Servers im Hausnetz eintragen. Bereiche anlegen: je Bereich eine Audio-Zone, das Hauptlicht und die Loxone-Räume.
-4. **Pair:** Board per USB an den Rechner mit Chrome oder Edge, „Pair“. Die Seite schreibt die Firmware, übergibt das WLAN, Jarvis setzt einen eigenen Schlüssel. Danach USB ab, Board an ein USB-C-Netzteil im Raum, Bereich zuordnen.
+4. **Pair:** Board per USB an den Rechner mit Chrome oder Edge, „Pair“. Über `http://<IP>:8500` lädt die Seite einmal `jarvis-pair.py`. Das Programm mit `python3 jarvis-pair.py` starten (Windows: `py -3 jarvis-pair.py`). Es öffnet eine lokale Seite, schreibt die Firmware, übergibt das WLAN, und Jarvis setzt einen eigenen Schlüssel. Danach USB ab, Board an ein USB-C-Netzteil im Raum, Bereich zuordnen.
 5. **Übersicht:** Personen mit Anrede (Name, Sir, Mam) und Notizen anlegen, optional Stimmprofil mit drei Sätzen aufnehmen. Notizen des Haushalts und Zeitzone.
 6. Optional **Loxone Config · MCP:** In Config den MCP-Server in der Titelleiste einschalten und die Adresse eintragen. Dann legt Jarvis neue Logik an, nach Ansage und „Ja“. Bietet Config ein Werkzeug zum Speichern auf den Miniserver an, nutzt Jarvis es, sonst bleibt die Änderung im offenen Projekt.
 

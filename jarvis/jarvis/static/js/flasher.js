@@ -8,8 +8,9 @@ const ESPRESSIF_VID = 0x303a;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function pairSupported() {
+  // On http://<IP> the browser hides Web Serial. Pair then downloads a localhost helper.
+  if (!window.isSecureContext) return null;
   if (!("serial" in navigator)) return "Pair braucht Chrome oder Edge am Rechner, an dem das Board steckt.";
-  if (!window.isSecureContext) return "Pair braucht die HTTPS-Adresse von Coolify. Über http://IP lässt der Browser nicht an USB.";
   return null;
 }
 
