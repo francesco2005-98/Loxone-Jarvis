@@ -36,13 +36,13 @@ const ctx = {
 function gateGlobe(instant = false) {
   const w = window.innerWidth;
   const hgt = window.innerHeight;
-  scene.setGlobe(w / 2, hgt * 0.44, Math.min(w, hgt) * 0.16, 1, instant);
+  scene.setGlobe(w / 2, hgt * 0.42, Math.min(w, hgt) * 0.3, 1, instant);
 }
 
 function backgroundGlobe() {
   const w = window.innerWidth;
   const hgt = window.innerHeight;
-  scene.setGlobe(w * 0.84, hgt * 0.7, Math.min(w, hgt) * 0.2, 0.1);
+  scene.setGlobe(w * 0.78, hgt * 0.52, Math.min(w, hgt) * 0.38, 0.62);
 }
 
 function dominantPhase() {

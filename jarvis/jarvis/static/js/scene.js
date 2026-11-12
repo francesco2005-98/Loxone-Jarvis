@@ -14,6 +14,7 @@ uniform float uTilt;
 uniform float uDpr;
 uniform float uEnergy;
 uniform float uTime;
+uniform float uPoint;
 varying float vFront;
 varying float vSeed;
 void main() {
@@ -28,8 +29,8 @@ void main() {
   gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
   vFront = (p.z + 1.0) * 0.5;
   vSeed = aSeed;
-  float scale = clamp(uRadius / 200.0, 0.8, 1.9);
-  gl_PointSize = (1.3 + 2.3 * vFront) * uDpr * scale * (1.0 + uEnergy * 0.35);
+  float scale = clamp(uRadius / 280.0, 0.7, 2.2);
+  gl_PointSize = (0.85 + 1.7 * vFront) * uDpr * scale * uPoint * (1.0 + uEnergy * 0.45);
 }`;
 
 const GLOBE_FS = `
@@ -48,10 +49,11 @@ void main() {
   vec2 d = gl_PointCoord - 0.5;
   float r = dot(d, d);
   if (r > 0.25) discard;
-  float soft = smoothstep(0.25, 0.02, r);
-  float glint = 0.85 + 0.15 * sin(uTime * (1.5 + vSeed * 3.0) + vSeed * 40.0);
-  float a = mix(0.22, 1.0, vFront * vFront) * soft * glint * uAlpha * (0.9 + uEnergy * 0.3);
-  gl_FragColor = vec4(uColor * (0.85 + 0.45 * vFront), a);
+  float soft = smoothstep(0.25, 0.0, r);
+  float core = smoothstep(0.07, 0.0, r);
+  float glint = 0.72 + 0.28 * sin(uTime * (1.8 + vSeed * 4.0) + vSeed * 40.0);
+  float a = mix(0.16, 1.0, vFront * vFront) * (soft * 0.65 + core * 0.9) * glint * uAlpha * (0.85 + uEnergy * 0.4);
+  gl_FragColor = vec4(uColor * (0.75 + 0.7 * vFront), a);
 }`;
 
 const RING_VS = `
@@ -145,10 +147,10 @@ uniform float uTime;
 uniform float uDpr;
 varying float vTw;
 void main() {
-  vec2 p = aPos.xy + vec2(sin(uTime * 0.03 + aPos.z * 20.0), cos(uTime * 0.025 + aPos.z * 13.0)) * 0.01;
+  vec2 p = aPos.xy + vec2(sin(uTime * 0.11 + aPos.z * 20.0), cos(uTime * 0.09 + aPos.z * 13.0)) * 0.045;
   gl_Position = vec4(p, 0.0, 1.0);
-  vTw = 0.4 + 0.6 * (0.5 + 0.5 * sin(uTime * (0.4 + aPos.z) + aPos.z * 50.0));
-  gl_PointSize = (0.8 + aPos.z * 1.6) * uDpr;
+  vTw = 0.35 + 0.65 * (0.5 + 0.5 * sin(uTime * (0.8 + aPos.z * 2.2) + aPos.z * 50.0));
+  gl_PointSize = (1.1 + aPos.z * 2.4) * uDpr;
 }`;
 
 const DUST_FS = `
@@ -162,7 +164,8 @@ varying float vTw;
 void main() {
   vec2 d = gl_PointCoord - 0.5;
   if (dot(d, d) > 0.25) discard;
-  gl_FragColor = vec4(uColor, 0.28 * vTw);
+  float soft = smoothstep(0.25, 0.02, dot(d, d));
+  gl_FragColor = vec4(uColor, 0.55 * vTw * soft);
 }`;
 
 function compile(gl, type, src) {
@@ -201,36 +204,37 @@ function buffer(gl, data) {
   return b;
 }
 
-function globePoints(dense) {
+function globePoints(fine) {
   const pts = [];
-  const seed = () => Math.random();
-  const latStep = dense ? 9 : 12;
-  for (let lat = -81; lat <= 81; lat += latStep) {
+  const push = (x, y, z) => pts.push(x, y, z, Math.random());
+  const latStep = fine ? 3 : 5;
+  const latDensity = fine ? 260 : 150;
+  for (let lat = -88; lat <= 88; lat += latStep) {
     const r = Math.cos((lat * Math.PI) / 180);
     const y = Math.sin((lat * Math.PI) / 180);
-    const n = Math.max(12, Math.round((dense ? 120 : 80) * r));
+    const n = Math.max(28, Math.round(latDensity * r));
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
-      pts.push(Math.cos(a) * r, y, Math.sin(a) * r, seed());
+      push(Math.cos(a) * r, y, Math.sin(a) * r);
     }
   }
-  const meridians = dense ? 24 : 18;
+  const meridians = fine ? 56 : 32;
+  const steps = fine ? 160 : 96;
   for (let m = 0; m < meridians; m++) {
     const a = (m / meridians) * Math.PI * 2;
-    for (let k = 0; k < (dense ? 70 : 50); k++) {
-      const lat = -Math.PI / 2 + (k / (dense ? 69 : 49)) * Math.PI;
+    for (let k = 0; k <= steps; k++) {
+      const lat = -Math.PI / 2 + (k / steps) * Math.PI;
       const r = Math.cos(lat);
-      pts.push(Math.cos(a) * r, Math.sin(lat), Math.sin(a) * r, seed());
+      push(Math.cos(a) * r, Math.sin(lat), Math.sin(a) * r);
     }
   }
-  const fill = dense ? 320 : 180;
+  const fill = fine ? 4200 : 1800;
   const golden = Math.PI * (3 - Math.sqrt(5));
   for (let i = 0; i < fill; i++) {
     const y = 1 - (i / (fill - 1)) * 2;
-    const r = Math.sqrt(1 - y * y);
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
     const t = golden * i;
-    const k = 0.985 + Math.random() * 0.03;
-    pts.push(Math.cos(t) * r * k, y * k, Math.sin(t) * r * k, seed());
+    push(Math.cos(t) * r, y, Math.sin(t) * r);
   }
   return new Float32Array(pts);
 }
@@ -267,7 +271,7 @@ export class Scene {
     this.rot = 0;
     this.last = 0;
     this.frame = 0;
-    const gl = canvas.getContext("webgl", { antialias: true, alpha: false, powerPreference: "low-power" });
+    const gl = canvas.getContext("webgl", { antialias: true, alpha: false, powerPreference: "high-performance" });
     this.gl = gl;
     if (!gl) return;
     try {
@@ -291,25 +295,26 @@ export class Scene {
 
   setup() {
     const gl = this.gl;
-    this.dense = Math.max(window.innerWidth, window.innerHeight) * (window.devicePixelRatio || 1) > 2200;
+    const pixels = window.innerWidth * window.innerHeight * (window.devicePixelRatio || 1);
+    this.fine = pixels > 900000;
     this.progGlobe = program(gl, GLOBE_VS, GLOBE_FS);
     this.progRing = program(gl, RING_VS, RING_FS);
     this.progTick = program(gl, TICK_VS, FLAT_FS);
     this.progGrid = program(gl, GRID_VS, GRID_FS);
     this.progDust = program(gl, DUST_VS, DUST_FS);
 
-    const g = globePoints(this.dense);
+    const g = globePoints(this.fine);
     this.globeCount = g.length / 4;
     this.globeBuf = buffer(gl, g);
 
-    const seg = 256;
+    const seg = 720;
     const ring = [];
     for (let i = 0; i <= seg; i++) ring.push(i / seg, -1, i / seg, 1);
     this.ringCount = (seg + 1) * 2;
     this.ringBuf = buffer(gl, new Float32Array(ring));
 
     const ticks = [];
-    const n = 120;
+    const n = 240;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
       const long = i % 10 === 0 ? 1 : 0.45;
@@ -319,37 +324,44 @@ export class Scene {
     this.tickBuf = buffer(gl, new Float32Array(ticks));
 
     const grid = [];
-    const far = 70;
-    for (let x = -36; x <= 36; x += 2) grid.push(x, 0, 0, x, 0, -far);
-    for (let z = 0; z <= far; z += 2) grid.push(-60, 1, -z, 60, 1, -z);
+    const far = 90;
+    for (let x = -48; x <= 48; x += 1) grid.push(x, 0, 0, x, 0, -far);
+    for (let z = 0; z <= far; z += 1) grid.push(-72, 1, -z, 72, 1, -z);
     this.gridCount = grid.length / 3;
     this.gridBuf = buffer(gl, new Float32Array(grid));
     this.gridFar = far;
 
     const dust = [];
-    for (let i = 0; i < 170; i++) dust.push(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random());
-    this.dustCount = 170;
+    for (let i = 0; i < 520; i++) dust.push(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random());
+    this.dustCount = 520;
     this.dustBuf = buffer(gl, new Float32Array(dust));
 
     this.arcs = [
-      { r: 1.34, w: 2.6, start: 0.2, len: 0.85, speed: 0.12, a: 0.95 },
-      { r: 1.34, w: 2.6, start: 2.6, len: 0.5, speed: 0.12, a: 0.9 },
-      { r: 1.5, w: 2.2, start: 1.1, len: 1.1, speed: -0.07, a: 0.75 },
-      { r: 1.5, w: 2.2, start: 4.3, len: 0.6, speed: -0.07, a: 0.7 },
-      { r: 1.62, w: 1.6, start: 3.4, len: 0.35, speed: 0.04, a: 0.55 },
-      { r: 1.18, w: 1.4, start: 5.0, len: 0.4, speed: -0.18, a: 0.6 },
+      { r: 1.08, w: 3.2, start: 0.4, len: 1.15, speed: 0.22, a: 0.95 },
+      { r: 1.08, w: 3.2, start: 3.5, len: 0.55, speed: 0.22, a: 0.8 },
+      { r: 1.28, w: 2.8, start: 0.15, len: 0.9, speed: 0.16, a: 1 },
+      { r: 1.28, w: 2.8, start: 2.4, len: 0.45, speed: 0.16, a: 0.85 },
+      { r: 1.46, w: 2.4, start: 1.05, len: 1.35, speed: -0.11, a: 0.8 },
+      { r: 1.46, w: 2.4, start: 4.2, len: 0.7, speed: -0.11, a: 0.7 },
+      { r: 1.68, w: 1.8, start: 2.2, len: 0.5, speed: 0.07, a: 0.65 },
+      { r: 1.68, w: 1.8, start: 5.1, len: 0.32, speed: 0.07, a: 0.5 },
+      { r: 1.92, w: 1.5, start: 0.8, len: 0.85, speed: -0.05, a: 0.45 },
+      { r: 2.12, w: 1.2, start: 3.3, len: 0.4, speed: 0.09, a: 0.4 },
     ];
     this.baseRings = [
-      { r: 1.18, a: 0.12 },
-      { r: 1.34, a: 0.22 },
-      { r: 1.5, a: 0.16 },
-      { r: 1.62, a: 0.1 },
+      { r: 1.02, a: 0.28, w: 1.6 },
+      { r: 1.08, a: 0.14, w: 1.1 },
+      { r: 1.28, a: 0.22, w: 1.4 },
+      { r: 1.46, a: 0.16, w: 1.2 },
+      { r: 1.68, a: 0.12, w: 1.0 },
+      { r: 1.92, a: 0.1, w: 0.9 },
+      { r: 2.12, a: 0.07, w: 0.8 },
     ];
   }
 
   resize() {
     if (!this.gl) return;
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = Math.min(window.devicePixelRatio || 1, 3);
     const w = Math.round(window.innerWidth * this.dpr);
     const h = Math.round(window.innerHeight * this.dpr);
     if (this.canvas.width !== w || this.canvas.height !== h) {
@@ -368,7 +380,7 @@ export class Scene {
 
   setPhase(phase) {
     this.phase = phase;
-    this.energyTarget = { listening: 0.55, collecting: 0.55, followup: 0.3, thinking: 0.35, speaking: 0.8 }[phase] ?? 0;
+    this.energyTarget = { listening: 0.62, collecting: 0.62, followup: 0.4, thinking: 0.48, speaking: 0.9 }[phase] ?? 0.22;
     this.kick();
   }
 
@@ -403,9 +415,9 @@ export class Scene {
     const k = 1 - Math.exp(-dt * 2.6);
     for (const key of ["x", "y", "r", "alpha"]) this.globe[key] += (this.target[key] - this.globe[key]) * k;
     this.energy += (this.energyTarget - this.energy) * (1 - Math.exp(-dt * 4));
-    const resting = { listening: 0.55, collecting: 0.55, followup: 0.3, thinking: 0.35, speaking: 0.8 }[this.phase] ?? 0;
+    const resting = { listening: 0.62, collecting: 0.62, followup: 0.4, thinking: 0.48, speaking: 0.9 }[this.phase] ?? 0.22;
     this.energyTarget += (resting - this.energyTarget) * (1 - Math.exp(-dt * 1.5));
-    this.rot += dt * (0.12 + this.energy * 0.25);
+    this.rot += dt * (0.28 + this.energy * 0.55);
     this.draw(dt);
   }
 
@@ -425,9 +437,9 @@ export class Scene {
       gl.useProgram(pr.p);
       const mvp = multiply(perspective(0.95, W / H, 0.1, 120), view(-0.08, 1.7));
       gl.uniformMatrix4fv(pr.u.uMVP, false, new Float32Array(mvp));
-      gl.uniform1f(pr.u.uScroll, this.reduced ? 0 : (this.time * 0.35) % 2);
+      gl.uniform1f(pr.u.uScroll, this.reduced ? 0 : (this.time * 0.7) % 2);
       gl.uniform1f(pr.u.uFar, this.gridFar);
-      gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.07 + this.energy * 0.05);
+      gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.16 + this.energy * 0.08);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.gridBuf);
       gl.enableVertexAttribArray(pr.a.aPos);
       gl.vertexAttribPointer(pr.a.aPos, 3, gl.FLOAT, false, 0, 0);
@@ -467,20 +479,24 @@ export class Scene {
       gl.vertexAttribPointer(pr.a.aT, 1, gl.FLOAT, false, 8, 0);
       gl.vertexAttribPointer(pr.a.aSide, 1, gl.FLOAT, false, 8, 4);
       gl.uniform1f(pr.u.uFade, 0);
+      const breathe = 1 + 0.018 * Math.sin(this.time * 1.6);
       for (const ring of this.baseRings) {
-        gl.uniform1f(pr.u.uRadius, R * ring.r);
-        gl.uniform1f(pr.u.uWidth, 1.0 * dpr);
+        gl.uniform1f(pr.u.uRadius, R * ring.r * breathe);
+        gl.uniform1f(pr.u.uWidth, ring.w * 5.5 * dpr);
         gl.uniform1f(pr.u.uStart, 0);
         gl.uniform1f(pr.u.uLen, Math.PI * 2);
+        gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], ring.a * 0.35 * g.alpha);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.ringCount);
+        gl.uniform1f(pr.u.uWidth, ring.w * dpr);
         gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], ring.a * g.alpha);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.ringCount);
       }
       gl.uniform1f(pr.u.uFade, 1);
-      const speedUp = 1 + this.energy * 3.5;
+      const speedUp = 1 + this.energy * 4.2;
       for (const arc of this.arcs) {
         const start = arc.start + this.time * arc.speed * speedUp;
-        gl.uniform1f(pr.u.uRadius, R * arc.r);
-        gl.uniform1f(pr.u.uWidth, arc.w * dpr * (1 + this.energy * 0.4));
+        gl.uniform1f(pr.u.uRadius, R * arc.r * breathe);
+        gl.uniform1f(pr.u.uWidth, arc.w * dpr * (1 + this.energy * 0.55));
         gl.uniform1f(pr.u.uStart, start);
         gl.uniform1f(pr.u.uLen, arc.len * (1 + this.energy * 0.3));
         gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], arc.a * g.alpha * (0.75 + this.energy * 0.5));
@@ -496,10 +512,10 @@ export class Scene {
       gl.useProgram(pr.p);
       gl.uniform2f(pr.u.uRes, W, H);
       gl.uniform2f(pr.u.uCenter, cx, cy);
-      gl.uniform1f(pr.u.uRadius, R * 1.74);
-      gl.uniform1f(pr.u.uLen, R * 0.06);
-      gl.uniform1f(pr.u.uRot, this.time * 0.01);
-      gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.18 * g.alpha);
+      gl.uniform1f(pr.u.uRadius, R * 2.28);
+      gl.uniform1f(pr.u.uLen, R * 0.045);
+      gl.uniform1f(pr.u.uRot, this.time * 0.08);
+      gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.34 * g.alpha);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.tickBuf);
       gl.enableVertexAttribArray(pr.a.aAngle);
       gl.enableVertexAttribArray(pr.a.aR);
@@ -517,18 +533,23 @@ export class Scene {
       gl.uniform2f(pr.u.uRes, W, H);
       gl.uniform2f(pr.u.uCenter, cx, cy);
       gl.uniform1f(pr.u.uRadius, R);
-      gl.uniform1f(pr.u.uRot, this.rot);
-      gl.uniform1f(pr.u.uTilt, 0.32);
+      gl.uniform1f(pr.u.uTilt, 0.38 + 0.06 * Math.sin(this.time * 0.35));
       gl.uniform1f(pr.u.uDpr, dpr);
       gl.uniform1f(pr.u.uEnergy, this.energy);
       gl.uniform1f(pr.u.uTime, this.time);
       gl.uniform3f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2]);
-      gl.uniform1f(pr.u.uAlpha, g.alpha);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.globeBuf);
       gl.enableVertexAttribArray(pr.a.aPos);
       gl.enableVertexAttribArray(pr.a.aSeed);
       gl.vertexAttribPointer(pr.a.aPos, 3, gl.FLOAT, false, 16, 0);
       gl.vertexAttribPointer(pr.a.aSeed, 1, gl.FLOAT, false, 16, 12);
+      gl.uniform1f(pr.u.uRot, -this.rot * 0.42);
+      gl.uniform1f(pr.u.uPoint, 3.4);
+      gl.uniform1f(pr.u.uAlpha, g.alpha * 0.28);
+      gl.drawArrays(gl.POINTS, 0, this.globeCount);
+      gl.uniform1f(pr.u.uRot, this.rot);
+      gl.uniform1f(pr.u.uPoint, 1.15);
+      gl.uniform1f(pr.u.uAlpha, g.alpha);
       gl.drawArrays(gl.POINTS, 0, this.globeCount);
       gl.disableVertexAttribArray(pr.a.aPos);
       gl.disableVertexAttribArray(pr.a.aSeed);

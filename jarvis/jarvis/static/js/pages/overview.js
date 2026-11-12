@@ -299,7 +299,7 @@ export default function overview(view, ctx) {
   function place(instant = false) {
     const r = slot.getBoundingClientRect();
     const usable = r.height - 34;
-    ctx.placeGlobe(r.left + r.width / 2, r.top + usable / 2, Math.max(60, Math.min(r.width, usable) * 0.27), 1, instant);
+    ctx.placeGlobe(r.left + r.width / 2, r.top + usable / 2, Math.max(110, Math.min(r.width, usable) * 0.46), 1, instant);
   }
   const onScroll = () => {
     if (raf) return;
