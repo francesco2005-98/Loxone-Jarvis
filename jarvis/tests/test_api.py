@@ -79,6 +79,12 @@ def test_pair_requires_house_address(client):
     assert client.post("/api/mics/pair", json={"ip": "8.8.8.8", "name": "jarvis-mic-abc123"}, headers=H).status_code == 400
 
 
+def test_http_port_defaults_to_8500(env):
+    from jarvis.config import Config
+
+    assert Config.from_env().http_port == 8500
+
+
 def test_index_has_strict_csp(client):
     res = client.get("/")
     assert res.status_code == 200

@@ -2,7 +2,7 @@
 
 Sprachassistent mit Jarvis-Persönlichkeit für ein Loxone-Haus. Wakeword-Mikrofone in den Räumen, freie Sätze für das ganze Haus, Antwort als Durchsage über den Loxone Audioserver. Ein Repo, eine Coolify-Anwendung, laufende Kosten nur bei Google (Gemini).
 
-- **Hören:** Seeed XIAO ESP32-S3 Sense mit „Hey Jarvis“ auf dem Board. Erst der Satz danach geht an Jarvis.
+- **Hören:** Seeed XIAO ESP32-S3 Sense mit „Jarvis“ auf dem Board. Erst der Satz danach geht an Jarvis.
 - **Verstehen:** Spracherkennung lokal (faster-whisper). Zu Google geht nur der erkannte Text.
 - **Denken:** Gemini (Standard `gemini-3.8-flash`, im Drop-down wählbar) mit den freigegebenen Bausteinen. Google-Suche nur bei offenen Fragen.
 - **Handeln:** Miniserver über die Websocket-Schnittstelle, nur freigegebene Bausteine. Alarm, Schloss und Garage erst nach gesprochenem „Ja“.
@@ -12,7 +12,7 @@ Sprachassistent mit Jarvis-Persönlichkeit für ein Loxone-Haus. Wakeword-Mikrof
 
 | Dienst | Aufgabe | Port |
 |---|---|---|
-| `jarvis` | Oberfläche, Mikrofone, Erkennung, Gemini, Loxone, Audioserver, Config-MCP | 8000 (über Coolify mit HTTPS), 8765 (nur für die Mikrofone im Hausnetz) |
+| `jarvis` | Oberfläche, Mikrofone, Erkennung, Gemini, Loxone, Audioserver, Config-MCP | 8500 (über Coolify mit HTTPS), 8765 (nur für die Mikrofone im Hausnetz) |
 | `piper` | Sprachausgabe, nur intern | 5000 |
 
 Daten liegen im Volume `jarvis-data` (SQLite). Zugangsdaten sind dort mit AES-GCM verschlüsselt, der Schlüssel kommt aus `JARVIS_SECRET_KEY` und liegt nur in Coolify.
@@ -21,7 +21,7 @@ Daten liegen im Volume `jarvis-data` (SQLite). Zugangsdaten sind dort mit AES-GC
 
 1. Neue Ressource → **Docker Compose** → dieses GitHub-Repo, Branch `main`, Datei `docker-compose.yml`.
 2. Umgebungsvariable `JARVIS_SECRET_KEY` als Secret setzen, zum Beispiel aus `openssl rand -base64 48`. Den Wert aufbewahren: ohne ihn lassen sich die gespeicherten Zugänge nicht mehr entschlüsseln.
-3. Beim Dienst `jarvis` eine Domain mit Port eintragen, zum Beispiel `https://jarvis.example.lan:8000`. Pair braucht HTTPS.
+3. Beim Dienst `jarvis` eine Domain mit Port eintragen, zum Beispiel `https://jarvis.example.lan:8500`. Pair braucht HTTPS.
 4. Deployen. Der erste Bau lädt Whisper-Modelle, das Sprechermodell und die Piper-Stimmen in die Images (einige Minuten, danach braucht der Betrieb kein Internet außer Gemini).
 5. Die Seite im Hausnetz öffnen und das Oberflächen-Passwort festlegen (mindestens 10 Zeichen).
 
@@ -47,7 +47,7 @@ Jarvis antwortet nur Adressen aus privaten Netzen, auch hinter dem Coolify-Proxy
 
 ## Firmware
 
-`firmware/jarvis-mic.yaml` wird vom Workflow **Firmware** mit ESPHome 2026.10.2 gebaut. Das Abbild landet in `jarvis/jarvis/static/firmware/` und wird von Pair und dem Update-Knopf auf der Mikrofonseite benutzt. Nach einer Änderung an der YAML baut der Workflow neu; manuell über *Actions → Firmware → Run workflow*.
+`firmware/jarvis-mic.yaml` wird vom Workflow **Firmware** mit ESPHome 2026.10.2 gebaut. Das Abbild landet in `jarvis/jarvis/static/firmware/` und wird von Pair und dem Update-Knopf auf der Mikrofonseite benutzt. Nach einer Änderung an der YAML baut der Workflow neu; manuell über *Actions → Firmware → Run workflow*. Das Wakeword auf dem Board ist „Jarvis“. Schon gekoppelte Boards übernehmen es mit dem Update-Knopf, sobald das neue Abbild vorliegt.
 
 ## Entwicklung
 

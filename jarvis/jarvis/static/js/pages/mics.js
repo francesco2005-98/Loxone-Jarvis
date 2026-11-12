@@ -85,7 +85,7 @@ export default function micsPage(view, ctx) {
       "div",
       { class: "kv" },
       h("div", { class: "label" }, "Wake Word"),
-      h("div", { class: "gold-text big" }, "Hey Jarvis"),
+      h("div", { class: "gold-text big" }, "Jarvis"),
       h("div", { class: "label" }, "Sprache"),
       lang,
       h("div", { class: "label" }, "Rauschfilter"),

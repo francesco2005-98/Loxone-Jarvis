@@ -32,7 +32,7 @@ ENV JARVIS_DATA_DIR=/data \
     HOME=/tmp
 
 USER jarvis
-EXPOSE 8000 8765
+EXPOSE 8500 8765
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=4).status==200 else 1)"
+  CMD python -c "import os,urllib.request,sys; p=os.environ.get('JARVIS_HTTP_PORT','8500'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/health',timeout=4).status==200 else 1)"
 CMD ["python", "-m", "jarvis"]
