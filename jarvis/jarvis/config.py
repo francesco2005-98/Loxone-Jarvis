@@ -36,6 +36,7 @@ class Config:
     initial_password: str | None = None
     piper_url: str = "http://piper:5000"
     http_port: int = 8500
+    https_port: int = 8501
     device_port: int = 8765
     models_dir: Path = Path("/models")
     insecure_cookies: bool = False
@@ -59,6 +60,7 @@ class Config:
             initial_password=os.environ.get("JARVIS_INITIAL_PASSWORD") or None,
             piper_url=os.environ.get("JARVIS_PIPER_URL", "http://piper:5000").rstrip("/"),
             http_port=int(os.environ.get("JARVIS_HTTP_PORT", "8500")),
+            https_port=int(os.environ.get("JARVIS_HTTPS_PORT", "8501") or 0),
             device_port=int(os.environ.get("JARVIS_DEVICE_PORT", "8765")),
             models_dir=Path(os.environ.get("JARVIS_MODELS_DIR", "/models")),
             insecure_cookies=os.environ.get("JARVIS_INSECURE_COOKIES", "") == "1",
