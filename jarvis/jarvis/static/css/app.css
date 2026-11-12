@@ -53,14 +53,16 @@ a { color: var(--gold); }
 
 #scene { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; z-index: 0; pointer-events: none; }
 .vignette { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden;
-  background: radial-gradient(ellipse at 50% 42%, transparent 58%, rgba(0, 0, 0, 0.38) 100%); }
+  background:
+    radial-gradient(ellipse at 50% 42%, transparent 50%, rgba(0, 0, 0, 0.5) 100%),
+    rgba(3, 4, 5, 0.38); }
 .vignette::before {
   content: ""; position: absolute; left: 0; right: 0; height: 22%;
   background: linear-gradient(to bottom, transparent, rgba(242, 194, 27, 0.05), transparent);
   animation: scan 9s linear infinite;
 }
 .vignette::after {
-  content: ""; position: absolute; inset: -20%; mix-blend-mode: screen; opacity: 0.9;
+  content: ""; position: absolute; inset: -20%; mix-blend-mode: screen; opacity: 0.55;
   background:
     radial-gradient(38% 30% at 22% 28%, rgba(242, 194, 27, 0.07), transparent 70%),
     radial-gradient(34% 28% at 80% 72%, rgba(255, 216, 77, 0.06), transparent 70%);
@@ -150,12 +152,6 @@ footer .progress { position: absolute; left: 0; bottom: 0; height: 2px; backgrou
     linear-gradient(var(--gold), var(--gold)) right bottom / 1px 16px no-repeat;
   animation: corners 4.8s ease-in-out infinite;
 }
-.card::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
-  background: linear-gradient(115deg, transparent 38%, rgba(242, 194, 27, 0.07) 50%, transparent 62%);
-  background-size: 240% 100%;
-  animation: sheen 8s ease-in-out infinite;
-}
 .card > * { position: relative; z-index: 1; }
 .page .grid > :nth-child(2) { animation-delay: 0.08s; }
 .page .grid > :nth-child(3) { animation-delay: 0.14s; }
@@ -164,7 +160,6 @@ footer .progress { position: absolute; left: 0; bottom: 0; height: 2px; backgrou
 .page .grid > :nth-child(6) { animation-delay: 0.32s; }
 .page .grid > :nth-child(n+7) { animation-delay: 0.38s; }
 .card:hover { border-color: var(--line-gold); transform: translateY(-4px); box-shadow: 0 0 0 1px rgba(242, 194, 27, 0.14), 0 24px 52px -24px rgba(242, 194, 27, 0.42); }
-.card:hover::after { animation-duration: 2.4s; }
 .card.gold { border-color: var(--line-gold); box-shadow: 0 0 0 1px rgba(242, 194, 27, 0.12), 0 0 40px -16px rgba(242, 194, 27, 0.35); animation: rise 0.75s var(--ease) backwards, gold-pulse 4.2s ease-in-out infinite; }
 .card.gold:hover { border-color: var(--gold); }
 .card-title { font-family: var(--mono); font-size: 0.9em; letter-spacing: 0.06em; color: var(--muted); text-transform: uppercase; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; line-height: 1.35; }
@@ -366,7 +361,6 @@ a.btn { text-decoration: none; }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @keyframes flow { to { stroke-dashoffset: -420; } }
 @keyframes scan { from { top: -25%; } to { top: 110%; } }
-@keyframes sheen { 0%, 55% { background-position: 130% 0; } 100% { background-position: -130% 0; } }
 @keyframes btn-sheen { 0%, 60% { transform: translateX(-130%); } 100% { transform: translateX(130%); } }
 @keyframes corners { 0%, 100% { opacity: 0.28; } 50% { opacity: 0.85; } }
 @keyframes mark-glow {
