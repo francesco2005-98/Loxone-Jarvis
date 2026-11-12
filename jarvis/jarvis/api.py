@@ -199,8 +199,9 @@ def build_router(house: House) -> APIRouter:
         mics = list(house.mics.mics.values())
         online = sum(1 for m in mics if m.connected)
         counts = house.catalog.counts(house.miniserver.state)
-        reachable_total = len(mics) + 2
-        reachable = online + int(house.miniserver.connected) + int(house.audioserver.connected)
+        audio_total = max(1, len(house.audioserver.clients))
+        reachable_total = len(mics) + 1 + audio_total
+        reachable = online + int(house.miniserver.connected) + house.audioserver.connected_count
         return {
             "gemini": {
                 "configured": house.secrets.has("gemini.api_key"),
@@ -214,7 +215,11 @@ def build_router(house: House) -> APIRouter:
                 "error": house.miniserver.error,
                 "name": house.miniserver.structure.ms_name,
             },
-            "audioserver": {"status": house.audioserver.status, "error": house.audioserver.error},
+            "audioserver": {
+                "status": house.audioserver.status,
+                "error": house.audioserver.error,
+                "servers": house.audioserver.servers(),
+            },
             "counts": counts,
             "reachable_pct": int(round(100 * reachable / reachable_total)) if reachable_total else 0,
             "listening": online > 0,
@@ -515,7 +520,8 @@ def build_router(house: House) -> APIRouter:
             "audioserver": {
                 "status": house.audioserver.status,
                 "error": house.audioserver.error,
-                "host": house.audioserver.host(),
+                "host": ", ".join(house.audioserver.hosts()) or None,
+                "servers": house.audioserver.servers(),
             },
             "mcp": {"url": house.settings.get("mcp.url"), "error": mcp.last_error},
             "last": house.coordinator.last,
@@ -580,11 +586,16 @@ def build_router(house: House) -> APIRouter:
 
     @router.post("/audioserver/test", dependencies=auth)
     async def audioserver_test() -> dict:
-        try:
-            await house.audioserver.ensure_ready(timeout=6)
-            return {"ok": True, "host": house.audioserver.host()}
-        except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "error": str(exc)}
+        servers = await house.audioserver.test(timeout=6)
+        if not servers:
+            return {"ok": False, "servers": [], "error": "Kein Audioserver gefunden"}
+        failed = [s for s in servers if not s["ok"]]
+        return {
+            "ok": not failed,
+            "servers": servers,
+            "host": ", ".join(s["host"] for s in servers),
+            "error": "; ".join(f"{s['name']}: {s['error']}" for s in failed) or None,
+        }
 
     # ------------------------------------------------------------------- live
     def ws_allowed(ws: WebSocket) -> bool:

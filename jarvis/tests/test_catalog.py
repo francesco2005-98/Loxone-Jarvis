@@ -24,6 +24,7 @@ def states(values):
 def test_structure_flattens_and_blocks_door_openers(catalog):
     structure = catalog.structure
     assert structure.audioserver_host() == "192.168.1.40"
+    assert structure.audioservers() == [{"uuid": "ms-audio", "name": "192.168.1.40", "host": "192.168.1.40"}]
     names = {e.name for e in catalog.entries()}
     assert "Deckenlicht" in names and "Rollo Terrasse" in names
     assert "Tür" not in names, "Intercom subtree must stay out"

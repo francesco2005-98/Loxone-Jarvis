@@ -38,15 +38,37 @@ class Structure:
     def zones(self) -> list[LoxControl]:
         return [c for c in self.controls.values() if c.type == "AudioZoneV2"]
 
+    def audioservers(self) -> list[dict]:
+        """Every Audioserver the zones use or the Miniserver lists: uuid, name and host without port."""
+        used = {str(zone.details.get("server", "")) for zone in self.zones()}
+        found: list[dict] = []
+        seen: set[str] = set()
+        for uuid, server in self.media_servers.items():
+            host = strip_port(str(server.get("host") or ""))
+            if not host or host in seen or (uuid not in used and server.get("type") != 2):
+                continue
+            seen.add(host)
+            found.append({"uuid": uuid, "name": str(server.get("name") or host), "host": host})
+        return found
+
     def audioserver_host(self) -> str | None:
         """Host of the Audioserver that serves the first audio zone."""
         for zone in self.zones():
-            server = self.media_servers.get(str(zone.details.get("server", "")))
-            if server and server.get("host"):
-                return str(server["host"]).split(":")[0]
-        for server in self.media_servers.values():
-            if server.get("type") == 2 and server.get("host"):
-                return str(server["host"]).split(":")[0]
+            host = self.zone_server_host(zone)
+            if host:
+                return host
+        servers = self.audioservers()
+        return servers[0]["host"] if servers else None
+
+    def zone_server_host(self, zone: LoxControl) -> str | None:
+        server = self.media_servers.get(str(zone.details.get("server", "")))
+        host = strip_port(str(server.get("host") or "")) if server else ""
+        return host or None
+
+    def zone_for_player(self, player: int) -> LoxControl | None:
+        for zone in self.zones():
+            if str(zone.details.get("playerid")) == str(player):
+                return zone
         return None
 
     def child(self, parent_uuid: str, suffix: str) -> LoxControl | None:
@@ -54,6 +76,16 @@ class Structure:
             if child_uuid.endswith(suffix):
                 return self.controls.get(child_uuid)
         return None
+
+
+def strip_port(host: str) -> str:
+    """'192.168.1.40:7091' -> '192.168.1.40'. Bracketed IPv6 keeps its address."""
+    host = host.strip()
+    if host.startswith("["):
+        return host.split("]", 1)[0] + "]"
+    if host.count(":") == 1:
+        return host.split(":", 1)[0]
+    return host
 
 
 def _states(raw: dict) -> dict[str, str]:

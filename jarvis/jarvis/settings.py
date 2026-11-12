@@ -89,6 +89,7 @@ def _timezone(value: Any) -> str:
 
 
 HOST = r"[A-Za-z0-9.\-:\[\]]+"
+HOSTS = rf"{HOST}(?:[\s,;]+{HOST})*"
 MODEL = r"[a-z0-9][a-z0-9.\-]{2,80}"
 VOICE = r"[a-z]{2}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)"
 
@@ -109,7 +110,7 @@ FIELDS: dict[str, Field] = {
     "loxone.host": Field("", _str(120, HOST)),
     "loxone.user": Field("jarvis", _str(64, r"[^/\s]+")),
     "loxone.tls": Field(False, _bool),
-    "audioserver.host": Field("", _str(120, HOST)),
+    "audioserver.host": Field("", _str(400, HOSTS)),
     "mcp.url": Field("", _str(300, r"https?://[^\s]+")),
     "mics.wifi_ssid": Field("", _str(32)),
     "mics.jarvis_address": Field("", _str(120, HOST)),

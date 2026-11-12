@@ -1,8 +1,10 @@
-"""Announcements on a Miniserver-paired Loxone Audioserver.
+"""Announcements and music on the Miniserver-paired Loxone Audioservers.
 
-The paired server only accepts commands after `secure/authenticate` with the
+A paired server only accepts commands after `secure/authenticate` with the
 Miniserver JWT. The reply is uploaded as WAV and played with
 `playuploadedfile`, which runs as an announcement: music pauses and resumes.
+A house can have several Audioservers; every zone talks to the one the
+Miniserver assigns it.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import base64
 import json
 import logging
 import os
+import re
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -26,6 +29,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from ..events import EventBus
 from ..loxone.client import MiniserverClient
 from ..loxone.protocol import load_public_key
+from ..loxone.structure import strip_port
 from ..settings import Settings
 
 log = logging.getLogger(__name__)
@@ -67,11 +71,14 @@ def build_authenticate(user: str, jwt: str, pubkey_pem: str, session_token: str)
 
 
 class AudioserverClient:
-    def __init__(self, settings: Settings, miniserver: MiniserverClient, events: EventBus):
-        self.settings = settings
+    """One connection to one Audioserver."""
+
+    def __init__(self, address: str, miniserver: MiniserverClient, events: EventBus, name: str = ""):
+        self.address = address
+        self.name = name or address
         self.miniserver = miniserver
         self.events = events
-        self.status = "nicht eingerichtet"
+        self.status = "wartet auf Miniserver"
         self.error: str | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._ready = asyncio.Event()
@@ -83,11 +90,11 @@ class AudioserverClient:
         self._kick = asyncio.Event()
 
     # ------------------------------------------------------------ lifecycle
-    def host(self) -> str | None:
-        return self.settings.get("audioserver.host") or self.miniserver.structure.audioserver_host()
+    def host(self) -> str:
+        return self.address
 
     def start(self) -> None:
-        self._task = asyncio.create_task(self._run(), name="audioserver")
+        self._task = asyncio.create_task(self._run(), name=f"audioserver {self.address}")
 
     async def stop(self) -> None:
         if self._task:
@@ -113,10 +120,10 @@ class AudioserverClient:
         backoff = 2.0
         while True:
             self._kick.clear()
-            host = self.host()
+            host = self.address
             token = self.miniserver.current_token()
-            if not host or not token:
-                self.status = "wartet auf Miniserver" if host else "nicht eingerichtet"
+            if not token:
+                self.status = "wartet auf Miniserver"
                 await self._sleep(5)
                 continue
             try:
@@ -126,9 +133,9 @@ class AudioserverClient:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                log.warning("Audioserver: %s", exc)
+                log.warning("Audioserver %s: %s", host, exc)
                 if self.status == "verbunden":
-                    self.events.log("audio", "Audioserver getrennt", str(exc)[:200])
+                    self.events.log("audio", f"Audioserver {self.name} getrennt", str(exc)[:200])
                 self.status = "getrennt"
                 self.error = str(exc)[:200]
             finally:
@@ -165,7 +172,7 @@ class AudioserverClient:
                     self.status = "verbunden"
                     self.error = None
                     self._ready.set()
-                    self.events.log("audio", "Audioserver angemeldet", host)
+                    self.events.log("audio", f"Audioserver {self.name} angemeldet", host)
                     await reader
                 finally:
                     reader.cancel()
@@ -340,6 +347,250 @@ class AudioserverClient:
 
     def event_active(self, player: int) -> bool:
         return bool(self._event_active.get(player))
+
+    def public(self) -> dict:
+        return {"name": self.name, "host": self.address, "status": self.status, "error": self.error}
+
+
+def parse_hosts(value: str | None) -> list[str]:
+    """Manual addresses, separated by comma, semicolon or whitespace."""
+    out: list[str] = []
+    for part in re.split(r"[\s,;]+", value or ""):
+        host = strip_port(part)
+        if host and host not in out:
+            out.append(host)
+    return out
+
+
+class Audioservers:
+    """All Audioservers of the house, one connection each.
+
+    Without manual addresses Jarvis connects to every Audioserver in the
+    Miniserver structure. A zone is routed to the server the structure names
+    for it, else to the server whose events carried its player id, else to the
+    only server there is.
+    """
+
+    SYNC_INTERVAL = 5.0
+
+    def __init__(self, settings: Settings, miniserver: MiniserverClient, events: EventBus):
+        self.settings = settings
+        self.miniserver = miniserver
+        self.events = events
+        self.clients: dict[str, AudioserverClient] = {}
+        self._seen: dict[int, str] = {}
+        self._listeners: list[Callable[[int, bool], None]] = []
+        self._started = False
+        self._task: asyncio.Task | None = None
+
+    # ------------------------------------------------------------ lifecycle
+    def configured(self) -> list[dict]:
+        found = self.miniserver.structure.audioservers()
+        manual = parse_hosts(self.settings.get("audioserver.host"))
+        if not manual:
+            return found
+        by_host = {server["host"]: server for server in found}
+        return [{"uuid": by_host.get(h, {}).get("uuid"), "name": by_host.get(h, {}).get("name") or h, "host": h} for h in manual]
+
+    def sync(self) -> None:
+        wanted = {server["host"]: server for server in self.configured()}
+        for host in [h for h in self.clients if h not in wanted]:
+            client = self.clients.pop(host)
+            asyncio.create_task(client.stop())
+            self._seen = {p: h for p, h in self._seen.items() if h != host}
+        for host, server in wanted.items():
+            client = self.clients.get(host)
+            if client is None:
+                client = AudioserverClient(host, self.miniserver, self.events, name=server["name"])
+                client.on_zone_event(lambda player, active, h=host: self._zone_event(h, player, active))
+                self.clients[host] = client
+                if self._started:
+                    client.start()
+            else:
+                client.name = server["name"]
+
+    def start(self) -> None:
+        self._started = True
+        self.sync()
+        for client in self.clients.values():
+            client.start()
+        self._task = asyncio.create_task(self._watch(), name="audioservers")
+
+    async def stop(self) -> None:
+        self._started = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        await asyncio.gather(*(client.stop() for client in self.clients.values()), return_exceptions=True)
+
+    async def _watch(self) -> None:
+        while True:
+            await asyncio.sleep(self.SYNC_INTERVAL)
+            try:
+                self.sync()
+            except Exception:  # noqa: BLE001
+                log.exception("audioserver sync failed")
+
+    def reconnect(self) -> None:
+        self.sync()
+        for client in self.clients.values():
+            client.reconnect()
+
+    def on_zone_event(self, listener: Callable[[int, bool], None]) -> None:
+        self._listeners.append(listener)
+
+    def _zone_event(self, host: str, player: int, active: bool) -> None:
+        self._seen[player] = host
+        for listener in list(self._listeners):
+            try:
+                listener(player, active)
+            except Exception:  # noqa: BLE001
+                log.exception("zone listener failed")
+
+    # --------------------------------------------------------------- state
+    @property
+    def connected(self) -> bool:
+        """At least one Audioserver is signed in."""
+        return any(client.connected for client in self.clients.values())
+
+    @property
+    def connected_count(self) -> int:
+        return sum(1 for client in self.clients.values() if client.connected)
+
+    @property
+    def status(self) -> str:
+        clients = list(self.clients.values())
+        if not clients:
+            return "nicht eingerichtet" if self.miniserver.connected else "wartet auf Miniserver"
+        ok = self.connected_count
+        if ok == len(clients):
+            return "verbunden"
+        if ok:
+            return f"teilweise verbunden ({ok}/{len(clients)})"
+        states = {client.status for client in clients}
+        return states.pop() if len(states) == 1 else "getrennt"
+
+    @property
+    def error(self) -> str | None:
+        for client in self.clients.values():
+            if client.error and not client.connected:
+                return client.error if len(self.clients) == 1 else f"{client.name}: {client.error}"
+        return None
+
+    def hosts(self) -> list[str]:
+        return list(self.clients)
+
+    def servers(self) -> list[dict]:
+        return [client.public() for client in self.clients.values()]
+
+    def client_for(self, player: int) -> AudioserverClient | None:
+        zone = self.miniserver.structure.zone_for_player(player)
+        host = self.miniserver.structure.zone_server_host(zone) if zone else None
+        if host in self.clients:
+            return self.clients[host]
+        if self._seen.get(player) in self.clients:
+            return self.clients[self._seen[player]]
+        if len(self.clients) == 1:
+            return next(iter(self.clients.values()))
+        return None
+
+    def ready_for(self, player: int) -> bool:
+        client = self.client_for(player)
+        return client is not None and client.connected
+
+    def _require(self, player: int) -> AudioserverClient:
+        client = self.client_for(player)
+        if client is None:
+            raise AudioserverError(f"Kein Audioserver für Player {player} gefunden")
+        return client
+
+    def event_active(self, player: int) -> bool:
+        client = self.client_for(player)
+        return client is not None and client.event_active(player)
+
+    # ------------------------------------------------------------- commands
+    async def test(self, timeout: float = 6.0) -> list[dict]:
+        self.sync()
+
+        async def one(client: AudioserverClient) -> dict:
+            try:
+                await client.ensure_ready(timeout=timeout)
+                return {**client.public(), "ok": True}
+            except Exception as exc:  # noqa: BLE001
+                reason = "wartet auf die Anmeldung am Miniserver" if client.status == "wartet auf Miniserver" else str(exc)
+                return {**client.public(), "ok": False, "error": reason[:200]}
+
+        return list(await asyncio.gather(*(one(c) for c in self.clients.values())))
+
+    async def announce(self, targets: list[tuple[int, int]], wav: bytes) -> Announcement:
+        """Play the WAV on every target, each through the Audioserver of its zone."""
+        groups: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        missing: list[int] = []
+        for player, volume in targets:
+            client = self.client_for(player)
+            if client is None:
+                missing.append(player)
+            else:
+                groups[client.address].append((player, volume))
+        if missing:
+            self.events.log("audio", "Kein Audioserver für Zone", ", ".join(f"Player {p}" for p in missing))
+        if not groups:
+            raise AudioserverError("Kein Audioserver für diese Zonen verbunden")
+        results = await asyncio.gather(
+            *(self.clients[host].announce(group, wav) for host, group in groups.items()), return_exceptions=True
+        )
+        parts = [r for r in results if isinstance(r, Announcement)]
+        failures = [(host, r) for host, r in zip(groups, results) if isinstance(r, BaseException)]
+        for host, exc in failures:
+            self.events.log("audio", f"Ansage über {self.clients[host].name} fehlgeschlagen", str(exc)[:200])
+        if not parts:
+            raise failures[0][1]
+        if len(parts) == 1:
+            return parts[0]
+        combined = Announcement("", set().union(*(part.players for part in parts)))
+        asyncio.create_task(_join(parts, combined))
+        return combined
+
+    async def favorites(self, player: int) -> list[dict]:
+        return await self._require(player).favorites(player)
+
+    async def play_favorite(self, player: int, slot: int) -> None:
+        await self._require(player).play_favorite(player, slot)
+
+    async def services(self, player: int) -> list[dict]:
+        return await self._require(player).services()
+
+    async def search_service(
+        self, player: int, service: str, user: str, query: str, *, kind: str = "playlist", limit: int = 8
+    ) -> list[dict]:
+        return await self._require(player).search_service(service, user, query, kind=kind, limit=limit)
+
+    async def play_service(self, player: int, service: str, user: str, audiopath: str) -> None:
+        await self._require(player).play_service(player, service, user, audiopath)
+
+
+async def _join(parts: list[Announcement], combined: Announcement, limit: float = 180.0) -> None:
+    """Began when the first server starts, finished when the last one ends."""
+
+    async def run() -> None:
+        began = [asyncio.create_task(part.began.wait()) for part in parts]
+        try:
+            await asyncio.wait(began, return_when=asyncio.FIRST_COMPLETED)
+            combined.began.set()
+            await asyncio.gather(*(part.finished.wait() for part in parts))
+        finally:
+            for task in began:
+                task.cancel()
+
+    try:
+        await asyncio.wait_for(run(), timeout=limit)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        combined.finished.set()
 
 
 def search_command(service: str, user: str, query: str, *, kind: str = "playlist", limit: int = 8) -> tuple[str, str]:
