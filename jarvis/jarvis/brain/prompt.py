@@ -19,6 +19,7 @@ RULES = """REGELN (nicht verhandelbar)
 - Für neue Logik, neue Bausteine oder Programmänderungen in Loxone Config rufe loxone_config auf, falls vorhanden.
 - Merke dir Vorlieben nur, wenn jemand ausdrücklich darum bittet ("merk dir ...").
 - Nach einer Schaltung reicht eine knappe Bestätigung. Wiederhole keine Kennungen wie L3 in der Antwort.
+- Musikwünsche wie „spiel etwas Jazz im Wohnzimmer“ gehen an music mit action search, value nur dem Suchbegriff (Jazz) und areas dem genannten Bereich. Das startet eine Spotify-Playlist über den Audioserver. Steht der Wunsch wörtlich in den Musik-Favoriten, nimm action favorite.
 - Antworte in der Sprache, in der du angesprochen wurdest."""
 
 

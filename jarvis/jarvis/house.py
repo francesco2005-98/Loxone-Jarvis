@@ -167,12 +167,49 @@ class House:
             slot = 1 if not text else None
         if slot is None:
             raise ActionError("Favorit nicht gefunden")
+        return await self._play_slot(zone, slot)
+
+    async def _play_slot(self, zone: LoxControl, slot: int) -> None:
+        from .loxone.catalog import ActionError
+
+        player = zone.details.get("playerid")
         if player is not None and self.audioserver.connected:
             await self.audioserver.play_favorite(int(player), slot)
         else:
             reply = await self.miniserver.command(zone.uuid, f"playZoneFav/{slot}")
             if not reply.ok:
                 raise ActionError(f"Miniserver meldet Code {reply.code}")
+
+    async def play_query(self, zone: LoxControl, query: str) -> str:
+        """Play a room favourite or the first matching Spotify playlist."""
+        from .loxone.catalog import ActionError
+
+        text = str(query or "").strip()
+        if len(text) < 2:
+            raise ActionError("Suchbegriff fehlt")
+        player = zone.details.get("playerid")
+        if player is None:
+            raise ActionError("Diese Zone hat keinen Player")
+        player_id = int(player)
+        if not self.audioserver.connected:
+            raise ActionError("Audioserver nicht verbunden")
+        if player_id not in self._favorites:
+            await self._load_favorites(player_id)
+        favourite = _match_favourite(text, self._favorites.get(player_id, (0, []))[1])
+        if favourite is not None:
+            await self.play_favorite(zone, favourite["name"])
+            return favourite["name"]
+        accounts = await self.audioserver.services()
+        spotify = next((account for account in accounts if account["service"] == "spotify"), None)
+        if spotify is None:
+            raise ActionError("Spotify ist am Audioserver nicht angemeldet")
+        items = await self.audioserver.search_service("spotify", spotify["user"], text)
+        if not items:
+            raise ActionError(f"Keine Spotify-Playlist zu „{text}“")
+        item = items[0]
+        await self.audioserver.play_service(player_id, "spotify", item["user"] or spotify["user"], item["path"])
+        self.events.log("audio", f"Spotify: {item['name']}", text)
+        return item["name"]
 
     # --------------------------------------------------------------- timers
     async def _timer_due(self, timer: dict) -> None:
@@ -205,3 +242,20 @@ class House:
             return json.loads(manifest.read_text("utf-8"))
         except ValueError:
             return None
+
+
+def _match_favourite(query: str, favourites: list[dict]) -> dict | None:
+    wanted = query.strip().lower()
+    exact = [item for item in favourites if str(item.get("name") or "").lower() == wanted]
+    if exact:
+        return exact[0]
+    contained = [
+        item
+        for item in favourites
+        if len(str(item.get("name") or "")) >= 3
+        and (str(item["name"]).lower() in wanted or wanted in str(item["name"]).lower())
+    ]
+    if not contained:
+        return None
+    contained.sort(key=lambda item: len(str(item["name"])), reverse=True)
+    return contained[0]

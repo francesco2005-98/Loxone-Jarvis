@@ -70,14 +70,19 @@ DECLARATIONS: list[dict] = [
     },
     {
         "name": "music",
-        "description": "Musik und Radio über den Loxone Audioserver. Ohne Bereich gilt der Bereich, in dem gesprochen wurde.",
+        "description": (
+            "Musik über den Loxone Audioserver. Ohne Bereich gilt der Bereich, in dem gesprochen wurde. "
+            "Für „spiel Jazz“, einen Künstlernamen oder eine Playlist action=search und value=nur der Suchbegriff, "
+            "z. B. Jazz. Das startet die passende Spotify-Playlist in der Zone. "
+            "Gespeicherte Favoriten bleiben action=favorite."
+        ),
         "parameters_json_schema": _schema(
             {
                 "action": {
                     "type": "string",
-                    "enum": ["play", "pause", "next", "previous", "volume", "louder", "quieter", "favorite"],
+                    "enum": ["play", "pause", "next", "previous", "volume", "louder", "quieter", "favorite", "search"],
                 },
-                "value": {"type": "string", "description": "Lautstärke 0-100 oder Name/Nummer des Favoriten"},
+                "value": {"type": "string", "description": "Lautstärke 0-100, Favoritenname oder Suchbegriff wie Jazz"},
                 "areas": {"type": "array", "items": {"type": "string"}, "description": "Namen der Bereiche"},
             },
             ["action"],
@@ -242,6 +247,11 @@ class ToolRunner:
                 continue
             if action == "favorite":
                 await house.play_favorite(zone, value)
+            elif action == "search":
+                title = await house.play_query(zone, str(value or ""))
+                turn.done.append(f"Musik {title} {area.name}")
+                done.append({"area": area.name, "ok": True, "title": title})
+                continue
             else:
                 cmd = {
                     "play": "play",

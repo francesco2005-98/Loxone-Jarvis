@@ -5,7 +5,7 @@ Sprachassistent mit Jarvis-Persönlichkeit für ein Loxone-Haus. Wakeword-Mikrof
 - **Hören:** Seeed XIAO ESP32-S3 Sense mit „Jarvis“ auf dem Board. Erst der Satz danach geht an Jarvis.
 - **Verstehen:** Spracherkennung lokal (faster-whisper). Zu Google geht nur der erkannte Text.
 - **Denken:** Gemini (Standard `gemini-3.8-flash`, im Drop-down wählbar) mit den freigegebenen Bausteinen. Google-Suche nur bei offenen Fragen.
-- **Handeln:** Miniserver über die Websocket-Schnittstelle, nur freigegebene Bausteine. Alarm, Schloss und Garage erst nach gesprochenem „Ja“.
+- **Handeln:** Miniserver über die Websocket-Schnittstelle, nur freigegebene Bausteine. Alarm, Schloss und Garage erst nach gesprochenem „Ja“. „Spiel Jazz im Wohnzimmer“ sucht am Audioserver eine Spotify-Playlist und startet sie in der Zone. Spotify muss dort angemeldet sein.
 - **Sprechen:** Piper lokal, als Durchsage über den Audioserver. Musik läuft danach weiter.
 
 ## Aufbau

@@ -3,6 +3,7 @@ import asyncio
 import pytest
 from google.genai import types
 
+from jarvis.brain.tools import Turn
 from jarvis.loxone.protocol import Reply
 from jarvis.loxone.structure import parse
 from jarvis.voice.arbitration import AreaSession
@@ -132,6 +133,58 @@ def test_offline_light_uses_main_light(setup):
     assert sent == [(dimmer.uuid, "on")]
     reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Wie spät ist es?", "de", None))
     assert "nicht erreichbar" in reply
+
+
+def test_play_query_starts_spotify_playlist(setup):
+    house, *_ = setup
+    structure = parse(SAMPLE_STRUCTURE)
+    zone = structure.controls["10000000-0000-0008-ffff000000000001"]
+    calls = []
+
+    class Audio:
+        connected = True
+
+        async def favorites(self, player):
+            return []
+
+        async def services(self):
+            return [{"service": "spotify", "user": "luca", "name": "Spotify"}]
+
+        async def search_service(self, service, user, query, *, kind="playlist", limit=8):
+            calls.append(("search", service, user, query, kind))
+            return [{"name": "Jazz Classics", "path": "spotify:playlist:abc", "playlist": True, "user": ""}]
+
+        async def play_service(self, player, service, user, path):
+            calls.append(("play", player, service, user, path))
+
+    house.audioserver = Audio()
+    title = run(house.play_query(zone, "Jazz"))
+    assert title == "Jazz Classics"
+    assert calls == [
+        ("search", "spotify", "luca", "Jazz", "playlist"),
+        ("play", 3, "spotify", "luca", "spotify:playlist:abc"),
+    ]
+
+
+def test_jazz_search_starts_in_the_named_area(setup):
+    house, area, *_ = setup
+    structure = parse(SAMPLE_STRUCTURE)
+    house.miniserver.structure = structure
+    zone_uuid = "10000000-0000-0008-ffff000000000001"
+    area = house.areas.update(area.id, zone_uuid=zone_uuid)
+    played = {}
+
+    async def play_query(zone, query):
+        played["zone"] = zone.uuid
+        played["query"] = query
+        return "Jazz Classics"
+
+    house.play_query = play_query
+    turn = Turn(area=area, lang="de", text="spiel etwas Jazz im Wohnzimmer")
+    result = run(house.brain.runner._tool_music({"action": "search", "value": "Jazz", "areas": ["Wohnbereich"]}, turn))
+    assert played == {"zone": zone_uuid, "query": "Jazz"}
+    assert result["results"] == [{"area": "Wohnbereich", "ok": True, "title": "Jazz Classics"}]
+    assert turn.done == ["Musik Jazz Classics Wohnbereich"]
 
 
 def test_thinking_level_only_for_gemini_3(setup):
