@@ -8,10 +8,15 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from jarvis.audio import wav
+from jarvis.db import Database
+from jarvis.loxone.structure import parse
+from jarvis.settings import Settings
 from jarvis.audio.audioserver import (
     Announcement,
     AudioserverClient,
+    Audioservers,
     build_authenticate,
+    parse_hosts,
     search_command,
     search_items,
     service_accounts,
@@ -36,8 +41,10 @@ def test_authenticate_command_decrypts_to_jwt():
 
 
 class _Stub:
-    def __init__(self):
-        self.structure = type("S", (), {"audioserver_host": lambda self: None})()
+    connected = True
+
+    def __init__(self, structure=None):
+        self.structure = structure or parse({})
 
     def current_token(self):
         return None
@@ -49,7 +56,7 @@ class _Events:
 
 
 def test_announcement_lifecycle_from_events():
-    client = AudioserverClient(settings=None, miniserver=_Stub(), events=_Events())
+    client = AudioserverClient("192.168.1.40", miniserver=_Stub(), events=_Events())
     seen = []
     client.on_zone_event(lambda pid, active: seen.append((pid, active)))
     ann = Announcement("jarvis-abc.wav", {3})
@@ -98,3 +105,81 @@ def test_spotify_accounts_and_playlists_are_parsed():
     )
     assert items[0]["name"] == "Jazz Classics"
     assert items[0]["path"] == "spotify:playlist:abc"
+
+
+TWO_SERVERS = {
+    "mediaServer": {
+        "as-eg": {"type": 2, "name": "Audioserver EG", "host": "192.168.1.40:7091"},
+        "as-og": {"type": 2, "name": "Audioserver OG", "host": "192.168.1.41:7091"},
+    },
+    "controls": {
+        "z-wohn": {"name": "Wohnzimmer", "type": "AudioZoneV2", "uuidAction": "z-wohn", "details": {"playerid": 1, "server": "as-eg"}},
+        "z-kind": {"name": "Kinderzimmer", "type": "AudioZoneV2", "uuidAction": "z-kind", "details": {"playerid": 7, "server": "as-og"}},
+    },
+}
+
+
+def _pool(structure=TWO_SERVERS, manual=""):
+    settings = Settings(Database(":memory:"))
+    if manual:
+        settings.update({"audioserver.host": manual})
+    pool = Audioservers(settings, _Stub(parse(structure)), _Events())
+    pool.sync()
+    return pool
+
+
+def test_every_audioserver_is_imported_and_zones_route_to_their_own():
+    pool = _pool()
+    assert pool.hosts() == ["192.168.1.40", "192.168.1.41"]
+    assert [s["name"] for s in pool.servers()] == ["Audioserver EG", "Audioserver OG"]
+    assert pool.client_for(1).address == "192.168.1.40"
+    assert pool.client_for(7).address == "192.168.1.41"
+    assert pool.client_for(99) is None
+    assert pool.status == "wartet auf Miniserver"
+    pool.clients["192.168.1.40"]._ready.set()
+    assert pool.status == "teilweise verbunden (1/2)"
+    assert pool.ready_for(1) and not pool.ready_for(7)
+
+
+def test_manual_addresses_replace_the_structure():
+    pool = _pool(manual="10.0.0.5, 10.0.0.6:7091")
+    assert pool.hosts() == ["10.0.0.5", "10.0.0.6"]
+    assert pool.client_for(1) is None, "no structure host matches, nothing learned yet"
+    pool._zone_event("10.0.0.6", 1, True)
+    assert pool.client_for(1).address == "10.0.0.6"
+    single = _pool(manual="10.0.0.5")
+    assert single.client_for(7).address == "10.0.0.5"
+
+
+def test_parse_hosts_and_setting_accept_lists():
+    assert parse_hosts("192.168.1.40; 192.168.1.41:7091  192.168.1.40") == ["192.168.1.40", "192.168.1.41"]
+    settings = Settings(Database(":memory:"))
+    settings.update({"audioserver.host": "192.168.1.40, 192.168.1.41"})
+    assert settings.get("audioserver.host") == "192.168.1.40, 192.168.1.41"
+
+
+def test_announcement_is_split_per_audioserver():
+    pool = _pool()
+    sent = {}
+
+    def fake(host):
+        async def announce(targets, wav_bytes):
+            sent[host] = targets
+            ann = Announcement(f"{host}.wav", {p for p, _ in targets})
+            ann.began.set()
+            return ann
+
+        return announce
+
+    for host, client in pool.clients.items():
+        client.announce = fake(host)
+
+    async def scenario():
+        combined = await pool.announce([(1, 40), (7, 30)], b"RIFF")
+        await asyncio.wait_for(combined.began.wait(), 1)
+        assert not combined.finished.is_set()
+        return combined
+
+    combined = asyncio.new_event_loop().run_until_complete(scenario())
+    assert sent == {"192.168.1.40": [(1, 40)], "192.168.1.41": [(7, 30)]}
+    assert combined.players == {1, 7}

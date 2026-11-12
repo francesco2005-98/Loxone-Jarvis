@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Coroutine
 
 from .areas import Area, Areas
-from .audio.audioserver import AudioserverClient
+from .audio.audioserver import Audioservers
 from .audio.speech import Speech
 from .audio.tts import Piper
 from .brain.config_agent import ConfigAgent
@@ -53,7 +53,7 @@ class House:
         self.timers = TimerService(self.db, self.settings)
         self.catalog = Catalog(self.db)
         self.miniserver = MiniserverClient(self.settings, self.secrets, self.catalog, self.events)
-        self.audioserver = AudioserverClient(self.settings, self.miniserver, self.events)
+        self.audioserver = Audioservers(self.settings, self.miniserver, self.events)
         self.piper = Piper(config.piper_url, self.settings)
         self.stt = Recognizer(config.models_dir)
         self.speaker = SpeakerRecognizer(config.models_dir / "speaker" / "wespeaker_en_voxceleb_resnet34_LM.onnx")
@@ -137,7 +137,7 @@ class House:
         player = int(zone.details["playerid"])
         cached = self._favorites.get(player)
         if cached is None or time.monotonic() - cached[0] > 600:
-            if self.audioserver.connected:
+            if self.audioserver.ready_for(player):
                 self.background(self._load_favorites(player), "favorites")
         return [f"{f['slot']}: {f['name']}" for f in (cached[1] if cached else [])]
 
@@ -173,7 +173,7 @@ class House:
         from .loxone.catalog import ActionError
 
         player = zone.details.get("playerid")
-        if player is not None and self.audioserver.connected:
+        if player is not None and self.audioserver.ready_for(int(player)):
             await self.audioserver.play_favorite(int(player), slot)
         else:
             reply = await self.miniserver.command(zone.uuid, f"playZoneFav/{slot}")
@@ -191,19 +191,19 @@ class House:
         if player is None:
             raise ActionError("Diese Zone hat keinen Player")
         player_id = int(player)
-        if not self.audioserver.connected:
-            raise ActionError("Audioserver nicht verbunden")
+        if not self.audioserver.ready_for(player_id):
+            raise ActionError("Audioserver dieser Zone nicht verbunden")
         if player_id not in self._favorites:
             await self._load_favorites(player_id)
         favourite = _match_favourite(text, self._favorites.get(player_id, (0, []))[1])
         if favourite is not None:
             await self.play_favorite(zone, favourite["name"])
             return favourite["name"]
-        accounts = await self.audioserver.services()
+        accounts = await self.audioserver.services(player_id)
         spotify = next((account for account in accounts if account["service"] == "spotify"), None)
         if spotify is None:
-            raise ActionError("Spotify ist am Audioserver nicht angemeldet")
-        items = await self.audioserver.search_service("spotify", spotify["user"], text)
+            raise ActionError("Spotify ist am Audioserver dieser Zone nicht angemeldet")
+        items = await self.audioserver.search_service(player_id, "spotify", spotify["user"], text)
         if not items:
             raise ActionError(f"Keine Spotify-Playlist zu „{text}“")
         item = items[0]

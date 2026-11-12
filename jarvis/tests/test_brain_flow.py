@@ -142,16 +142,18 @@ def test_play_query_starts_spotify_playlist(setup):
     calls = []
 
     class Audio:
-        connected = True
+        def ready_for(self, player):
+            return True
 
         async def favorites(self, player):
             return []
 
-        async def services(self):
+        async def services(self, player):
+            calls.append(("services", player))
             return [{"service": "spotify", "user": "luca", "name": "Spotify"}]
 
-        async def search_service(self, service, user, query, *, kind="playlist", limit=8):
-            calls.append(("search", service, user, query, kind))
+        async def search_service(self, player, service, user, query, *, kind="playlist", limit=8):
+            calls.append(("search", player, service, user, query, kind))
             return [{"name": "Jazz Classics", "path": "spotify:playlist:abc", "playlist": True, "user": ""}]
 
         async def play_service(self, player, service, user, path):
@@ -161,7 +163,8 @@ def test_play_query_starts_spotify_playlist(setup):
     title = run(house.play_query(zone, "Jazz"))
     assert title == "Jazz Classics"
     assert calls == [
-        ("search", "spotify", "luca", "Jazz", "playlist"),
+        ("services", 3),
+        ("search", 3, "spotify", "luca", "Jazz", "playlist"),
         ("play", 3, "spotify", "luca", "spotify:playlist:abc"),
     ]
 

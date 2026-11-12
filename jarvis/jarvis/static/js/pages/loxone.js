@@ -81,8 +81,9 @@ export default function loxonePage(view, ctx) {
   root.append(devicesCard);
 
   // ------------------------------------------------- audioserver & mcp
-  const asHost = h("input", { class: "input", maxlength: 120, placeholder: "automatisch aus dem Miniserver" });
+  const asHost = h("input", { class: "input", maxlength: 400, placeholder: "automatisch aus dem Miniserver" });
   const asState = h("span", {}, pill("–", "dim"));
+  const asList = h("div", { class: "stack" });
   const asSave = h("button", { class: "btn", type: "button" }, "Speichern & prüfen");
   const mcpUrl = h("input", { class: "input", maxlength: 300, placeholder: "http://192.168.1.30:PORT/mcp" });
   const mcpState = h("div", { class: "hint" }, "");
@@ -93,7 +94,7 @@ export default function loxonePage(view, ctx) {
       { class: "grid lower" },
       card(
         "Audioserver",
-        h("div", { class: "stack" }, h("div", { class: "row between" }, h("span", { class: "label" }, "Adresse"), asState), asHost, h("p", { class: "hint" }, "Jarvis meldet sich mit dem Token des Miniserver-Benutzers an und spielt Antworten als Durchsage. Musik läuft danach weiter."), h("div", { class: "row" }, h("span", { class: "spacer" }), asSave)),
+        h("div", { class: "stack" }, h("div", { class: "row between" }, h("span", { class: "label" }, "Audioserver"), asState), asList, h("span", { class: "label" }, "Adressen (optional)"), asHost, h("p", { class: "hint" }, "Jarvis übernimmt alle Audioserver aus dem Miniserver und spricht jede Zone über ihren eigenen Server an. Leer lassen, außer die Adressen aus Loxone Config sind von hier nicht erreichbar. Dann alle Adressen mit Komma getrennt eintragen. Jarvis meldet sich mit dem Token des Miniserver-Benutzers an und spielt Antworten als Durchsage. Musik läuft danach weiter."), h("div", { class: "row" }, h("span", { class: "spacer" }), asSave)),
       ),
       card(
         "Loxone Config · MCP-Server",
@@ -168,6 +169,19 @@ export default function loxonePage(view, ctx) {
     msName.textContent = d.name ? `Miniserver · ${d.name}` : "Miniserver · Zuhause";
     const as = d.audioserver;
     asState.replaceChildren(as.status === "verbunden" ? pill("Angemeldet", "live") : pill(as.status, as.error ? "bad" : "dim"));
+    const servers = as.servers || [];
+    asList.replaceChildren(
+      ...(servers.length
+        ? servers.map((sv) =>
+            h(
+              "div",
+              { class: "row between" },
+              h("div", {}, h("div", {}, sv.name), h("div", { class: "hint" }, sv.host), sv.error && sv.status !== "verbunden" ? h("div", { class: "error-text" }, sv.error) : null),
+              sv.status === "verbunden" ? pill("Angemeldet", "live") : pill(sv.status, sv.error ? "bad" : "dim"),
+            ),
+          )
+        : [h("p", { class: "muted small" }, "Noch kein Audioserver gefunden. Erscheint, sobald der Miniserver verbunden ist.")]),
+    );
     if (!asHost.value) asHost.placeholder = as.host ? `automatisch: ${as.host}` : "automatisch aus dem Miniserver";
     mcpState.textContent = d.mcp.error ? `Letzter Fehler: ${d.mcp.error}` : "";
   }
@@ -269,7 +283,8 @@ export default function loxonePage(view, ctx) {
   asSave.addEventListener("click", () => busy(asSave, async () => {
     await ctx.api("/settings", { method: "PUT", body: { values: { "audioserver.host": asHost.value } } }).catch((e) => toast(e.message, "bad"));
     const res = await ctx.api("/audioserver/test", { method: "POST" });
-    toast(res.ok ? `Audioserver ${res.host} angemeldet` : `Audioserver: ${res.error}`, res.ok ? "info" : "bad");
+    const count = (res.servers || []).length;
+    toast(res.ok ? `${count === 1 ? "Audioserver" : `${count} Audioserver`} angemeldet: ${res.host}` : `Audioserver: ${res.error}`, res.ok ? "info" : "bad");
     load();
   }));
 
