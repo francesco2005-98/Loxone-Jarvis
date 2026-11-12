@@ -1,0 +1,6 @@
+Source: https://github.com/TaterTotterson/microWakeWords
+Commit: 022fd4bdf98a61570ce8fffa6fe52482e1629e9d
+Files: microWakeWords/jarvis.json and microWakeWords/jarvis.tflite
+Wake word: Jarvis
+Author: Tater Totterson
+The two files are copied unchanged so the firmware build does not depend on that repository at compile time.

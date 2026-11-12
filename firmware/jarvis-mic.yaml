@@ -1,12 +1,12 @@
 # Jarvis microphone for the Seeed XIAO ESP32-S3 Sense (Reichelt 406873 / 358353).
 # Built by GitHub Actions into jarvis/jarvis/static/firmware and flashed from the browser.
-# The board only hears the wake word and streams the sentence after it to Jarvis.
+# The board only hears the wake word "Jarvis" and streams the sentence after it.
 # Camera, SD card and Bluetooth stay off. No credentials for Loxone or Gemini live here.
 
 substitutions:
   name: jarvis-mic
   friendly_name: Jarvis Mikrofon
-  version: "1.0.0"
+  version: "1.0.1"
 
 esphome:
   name: ${name}
@@ -113,8 +113,9 @@ micro_wake_word:
   stop_after_detection: true
   vad:
   models:
-    - model: hey_jarvis
-      id: hey_jarvis
+    # "Jarvis" only. microWakeWord v2, see models/SOURCE.txt.
+    - model: models/jarvis.json
+      id: jarvis
   on_wake_word_detected:
     - voice_assistant.start:
         wake_word: !lambda return wake_word;
@@ -221,7 +222,7 @@ number:
       - lambda: |-
           float s = x;
           float cutoff = s <= 50 ? 250.0f - 0.3f * s : 235.0f - 0.6f * (s - 50.0f);
-          id(hey_jarvis).set_probability_cutoff((uint8_t) cutoff);
+          id(jarvis).set_probability_cutoff((uint8_t) cutoff);
 
 button:
   - platform: factory_reset

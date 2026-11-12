@@ -18,6 +18,8 @@ from .device_api import create_device_app
 from .house import STATIC_DIR, House
 from .security import HardeningMiddleware, LanOnlyMiddleware
 
+log = logging.getLogger("jarvis")
+
 
 def create_app(house: House) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -72,6 +74,7 @@ async def serve() -> None:
         uvicorn.Config(create_device_app(house), host="0.0.0.0", port=config.device_port, access_log=False)
     )
     device_task = asyncio.create_task(devices.serve())
+    log.info("Weboberfläche erreichbar auf Port %s", config.http_port)
     try:
         await main.serve()
     finally:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -15,6 +16,7 @@ from .brain.gemini import BrainUnavailable
 from .house import House
 from .loxone.catalog import ActionError
 from .people import ENROLL_SENTENCES
+from .crypto import new_token
 from .security import SESSION_COOKIE, SESSION_TTL, LoginLimiter
 from .settings import SECRET_KEYS, SettingsError
 from .voice.mics import PairError
@@ -168,7 +170,13 @@ def build_router(house: House) -> APIRouter:
     async def logout(request: Request) -> Response:
         house.auth.end_session(request.cookies.get(SESSION_COOKIE))
         response = JSONResponse({"ok": True})
-        response.delete_cookie(SESSION_COOKIE, path="/")
+        response.delete_cookie(
+            SESSION_COOKIE,
+            path="/",
+            httponly=True,
+            secure=not house.config.insecure_cookies,
+            samesite="strict",
+        )
         return response
 
     @router.post("/password", dependencies=auth)
@@ -416,9 +424,8 @@ def build_router(house: House) -> APIRouter:
             raise HTTPException(409, str(exc)) from exc
         return {"ok": True}
 
-    @router.get("/mics/pair", dependencies=auth)
-    async def pair_info() -> dict:
-        """WiFi for Improv. Only handed to a logged-in browser while pairing."""
+    def pair_payload() -> dict:
+        """WiFi for Improv. Only handed to a logged-in browser or a fresh pair ticket."""
         return {
             "wifi_ssid": house.settings.get("mics.wifi_ssid"),
             "wifi_password": house.secrets.get("mics.wifi_password") or "",
@@ -426,8 +433,7 @@ def build_router(house: House) -> APIRouter:
             "firmware": house.firmware_info(),
         }
 
-    @router.post("/mics/pair", dependencies=auth)
-    async def pair(body: PairBody) -> dict:
+    async def pair_board(body: PairBody) -> dict:
         from .security import is_trusted
 
         if not is_trusted(body.ip, house.config.trusted_networks):
@@ -437,6 +443,55 @@ def build_router(house: House) -> APIRouter:
         except PairError as exc:
             raise HTTPException(409, str(exc)) from exc
         return mic.public()
+
+    tickets: dict[str, float] = {}
+
+    def issue_ticket() -> str:
+        now = time.monotonic()
+        for key, expires in list(tickets.items()):
+            if expires < now:
+                tickets.pop(key, None)
+        token = new_token(18)
+        tickets[token] = now + 600
+        return token
+
+    def ticket_ok(token: str) -> None:
+        if tickets.get(token, 0) < time.monotonic():
+            tickets.pop(token, None)
+            raise HTTPException(401, "Pair-Programm abgelaufen. In der Oberfläche erneut laden.")
+
+    @router.get("/mics/pair", dependencies=auth)
+    async def pair_info() -> dict:
+        return pair_payload()
+
+    @router.post("/mics/pair", dependencies=auth)
+    async def pair(body: PairBody) -> dict:
+        return await pair_board(body)
+
+    @router.get("/mics/pair/helper", dependencies=auth)
+    async def pair_helper(request: Request) -> Response:
+        """Script that opens localhost so USB pairing works on http://<IP>."""
+        token = issue_ticket()
+        origin = f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
+        template = (Path(__file__).parent / "static" / "pair" / "jarvis-pair.py").read_text(encoding="utf-8")
+        script = template.replace("__JARVIS_URL__", origin).replace("__JARVIS_TOKEN__", token)
+        return Response(
+            script,
+            media_type="text/x-python; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="jarvis-pair.py"'},
+        )
+
+    @router.get("/mics/pair/helper/{token}")
+    async def pair_helper_info(token: str) -> dict:
+        ticket_ok(token)
+        return pair_payload()
+
+    @router.post("/mics/pair/helper/{token}")
+    async def pair_helper_finish(token: str, body: PairBody) -> dict:
+        ticket_ok(token)
+        mic = await pair_board(body)
+        tickets.pop(token, None)
+        return mic
 
     # ----------------------------------------------------------------- loxone
     @router.get("/loxone", dependencies=auth)

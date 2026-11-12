@@ -47,17 +47,17 @@ jobs:
         run: |
           docker network create jarvis-ci
           docker run -d --name piper --network jarvis-ci loxone-jarvis/piper:ci
-          docker run -d --name jarvis --network jarvis-ci -p 8000:8000 \
+          docker run -d --name jarvis --network jarvis-ci -p 8500:8500 \
             -e JARVIS_SECRET_KEY=ci-only-secret-key-0123456789abcdef \
             -e JARVIS_PIPER_URL=http://piper:5000 \
             -e JARVIS_TRUSTED_NETWORKS=0.0.0.0/0 \
             --read-only --tmpfs /tmp -v jarvis-ci-data:/data loxone-jarvis/jarvis:ci
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8000/health; then break; fi
+            if curl -fsS http://127.0.0.1:8500/health; then break; fi
             sleep 2
           done
-          curl -fsS http://127.0.0.1:8000/api/session
-          curl -fsS http://127.0.0.1:8000/ | grep -q "JARVIS"
+          curl -fsS http://127.0.0.1:8500/api/session
+          curl -fsS http://127.0.0.1:8500/ | grep -q "JARVIS"
           for i in $(seq 1 60); do
             if docker exec jarvis python -c "import urllib.request,json; v=json.load(urllib.request.urlopen('http://piper:5000/voices')); assert len(v) >= 2; print([x['id'] for x in v])"; then break; fi
             sleep 3

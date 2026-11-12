@@ -85,7 +85,7 @@ export default function micsPage(view, ctx) {
       "div",
       { class: "kv" },
       h("div", { class: "label" }, "Wake Word"),
-      h("div", { class: "gold-text big" }, "Hey Jarvis"),
+      h("div", { class: "gold-text big" }, "Jarvis"),
       h("div", { class: "label" }, "Sprache"),
       lang,
       h("div", { class: "label" }, "Rauschfilter"),
@@ -388,7 +388,67 @@ export default function micsPage(view, ctx) {
 
   pairBtn.addEventListener("click", () => startPair());
 
+  function startLocalPair() {
+    const known = new Set(mics.map((mic) => mic.id));
+    const command = h("code", {}, "python3 jarvis-pair.py");
+    const status = h("p", { class: "hint" }, "Prüfe die Angaben …");
+    const done = h("div", { class: "stack" });
+    let timer = 0;
+    modal({
+      title: "Mikrofon koppeln",
+      body: h(
+        "div",
+        { class: "stack" },
+        h("p", { class: "muted" }, "Der Browser gibt USB an einer http-Adresse nicht frei. Das Pair-Programm öffnet die Kopplung lokal, ohne Domain und ohne HTTPS."),
+        done,
+        status,
+        command,
+        h("p", { class: "hint" }, "Windows: py -3 jarvis-pair.py. Das Board steckt an diesem Rechner. Es öffnet sich eine Seite in Chrome oder Edge."),
+      ),
+      actions: [{ label: "Schließen", onClick: (close) => close() }],
+      onClose: () => window.clearInterval(timer),
+    });
+    command.style.setProperty("display", "none");
+    (async () => {
+      try {
+        const info = await ctx.api("/mics/pair");
+        if (!info.firmware) throw new Error("Im Container liegt kein Firmware-Abbild.");
+        if (!info.device_url) throw new Error("Erst die Adresse von Jarvis im Hausnetz eintragen.");
+        if (!info.wifi_ssid) throw new Error("Erst das WLAN für die Mikrofone eintragen.");
+        done.append(
+          h("a", { class: "btn primary", href: "/api/mics/pair/helper", download: "jarvis-pair.py", style: { "text-decoration": "none" } }, "jarvis-pair.py laden"),
+        );
+        status.textContent = "Datei laden, im Download-Ordner starten, dann hier warten.";
+        command.style.removeProperty("display");
+        timer = window.setInterval(async () => {
+          try {
+            const data = await ctx.api("/mics");
+            const fresh = (data.mics || []).find((mic) => !known.has(mic.id));
+            if (!fresh) return;
+            window.clearInterval(timer);
+            status.textContent = `${fresh.name} ist gekoppelt.`;
+            const areaSelect = selectEl(areaOptions(), "");
+            areaSelect.addEventListener("change", () =>
+              ctx.api(`/mics/${fresh.id}`, { method: "PUT", body: { area_id: areaSelect.value || null } }).then(load),
+            );
+            done.append(h("div", { class: "label" }, "Bereich"), areaSelect);
+            load();
+          } catch {
+            /* keep waiting while the local program runs */
+          }
+        }, 2000);
+      } catch (e) {
+        status.textContent = "";
+        done.append(h("div", { class: "error-text" }, e.message || String(e)));
+      }
+    })();
+  }
+
   function startPair() {
+    if (!window.isSecureContext) {
+      startLocalPair();
+      return;
+    }
     const steps = [
       ["select", "Board auswählen"],
       ["download", "Firmware laden"],
