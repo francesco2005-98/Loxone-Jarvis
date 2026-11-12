@@ -258,10 +258,13 @@ function view(pitch, height) {
   return multiply(rot, trans);
 }
 
+const RESTING = { listening: 0.62, collecting: 0.62, followup: 0.4, thinking: 0.48, speaking: 0.9 };
+
+const gold = (a) => `rgba(242, 194, 27, ${a})`;
+
 export class Scene {
   constructor(canvas) {
     this.canvas = canvas;
-    this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.globe = { x: 0, y: 0, r: 0, alpha: 0 };
     this.target = { x: 0, y: 0, r: 0, alpha: 0 };
     this.energy = 0;
@@ -269,18 +272,18 @@ export class Scene {
     this.phase = "idle";
     this.time = 0;
     this.rot = 0;
+    this.pulse = 0;
     this.last = 0;
     this.frame = 0;
-    const gl = canvas.getContext("webgl", { antialias: true, alpha: false, powerPreference: "high-performance" });
-    this.gl = gl;
-    if (!gl) return;
-    try {
-      this.setup();
-    } catch (err) {
-      console.error("scene", err);
-      this.gl = null;
-      return;
-    }
+    this.mode = null;
+    this.gl = null;
+    this.software = false;
+    this.lite = false;
+    this.dprCap = 3;
+    this.avg = 1 / 60;
+    this.frames = 0;
+    if (!this.initGl()) this.init2d();
+    if (!this.mode) return;
     this.resize();
     window.addEventListener("resize", () => {
       this.resize();
@@ -293,10 +296,75 @@ export class Scene {
     this.kick();
   }
 
+  initGl() {
+    const gl = this.canvas.getContext("webgl", { antialias: true, alpha: false, powerPreference: "high-performance" });
+    if (!gl) return false;
+    this.gl = gl;
+    try {
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
+      this.software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer);
+      if (this.software) {
+        this.dprCap = 1;
+        this.lite = true;
+      }
+      this.setup();
+    } catch (err) {
+      console.error("scene", err);
+      this.gl = null;
+      // A canvas that already handed out a WebGL context cannot give a 2D one.
+      const fresh = this.canvas.cloneNode(false);
+      this.canvas.replaceWith(fresh);
+      this.canvas = fresh;
+      return false;
+    }
+    this.mode = "gl";
+    return true;
+  }
+
+  init2d() {
+    const ctx = this.canvas.getContext("2d");
+    if (!ctx) return;
+    this.ctx = ctx;
+    this.dprCap = 1.5;
+    const all = globePoints(false);
+    const pts = [];
+    for (let i = 0; i < all.length; i += 12) pts.push(all[i], all[i + 1], all[i + 2]);
+    this.pts2d = new Float32Array(pts);
+    this.dust2d = Array.from({ length: 160 }, () => [Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random()]);
+    this.initRings();
+    this.mode = "2d";
+  }
+
+  initRings() {
+    this.arcs = [
+      { r: 1.08, w: 3.2, start: 0.4, len: 1.15, speed: 0.22, a: 0.95 },
+      { r: 1.08, w: 3.2, start: 3.5, len: 0.55, speed: 0.22, a: 0.8 },
+      { r: 1.28, w: 2.8, start: 0.15, len: 0.9, speed: 0.16, a: 1 },
+      { r: 1.28, w: 2.8, start: 2.4, len: 0.45, speed: 0.16, a: 0.85 },
+      { r: 1.46, w: 2.4, start: 1.05, len: 1.35, speed: -0.11, a: 0.8 },
+      { r: 1.46, w: 2.4, start: 4.2, len: 0.7, speed: -0.11, a: 0.7 },
+      { r: 1.68, w: 1.8, start: 2.2, len: 0.5, speed: 0.07, a: 0.65 },
+      { r: 1.68, w: 1.8, start: 5.1, len: 0.32, speed: 0.07, a: 0.5 },
+      { r: 1.92, w: 1.5, start: 0.8, len: 0.85, speed: -0.05, a: 0.45 },
+      { r: 2.12, w: 1.2, start: 3.3, len: 0.4, speed: 0.09, a: 0.4 },
+      { r: 2.2, w: 2.2, start: 0, len: 1.7, speed: 0.38, a: 0.55 },
+    ];
+    this.baseRings = [
+      { r: 1.02, a: 0.28, w: 1.6 },
+      { r: 1.08, a: 0.14, w: 1.1 },
+      { r: 1.28, a: 0.22, w: 1.4 },
+      { r: 1.46, a: 0.16, w: 1.2 },
+      { r: 1.68, a: 0.12, w: 1.0 },
+      { r: 1.92, a: 0.1, w: 0.9 },
+      { r: 2.12, a: 0.07, w: 0.8 },
+    ];
+  }
+
   setup() {
     const gl = this.gl;
     const pixels = window.innerWidth * window.innerHeight * (window.devicePixelRatio || 1);
-    this.fine = pixels > 900000;
+    this.fine = !this.software && pixels > 900000;
     this.progGlobe = program(gl, GLOBE_VS, GLOBE_FS);
     this.progRing = program(gl, RING_VS, RING_FS);
     this.progTick = program(gl, TICK_VS, FLAT_FS);
@@ -336,51 +404,31 @@ export class Scene {
     this.dustCount = 520;
     this.dustBuf = buffer(gl, new Float32Array(dust));
 
-    this.arcs = [
-      { r: 1.08, w: 3.2, start: 0.4, len: 1.15, speed: 0.22, a: 0.95 },
-      { r: 1.08, w: 3.2, start: 3.5, len: 0.55, speed: 0.22, a: 0.8 },
-      { r: 1.28, w: 2.8, start: 0.15, len: 0.9, speed: 0.16, a: 1 },
-      { r: 1.28, w: 2.8, start: 2.4, len: 0.45, speed: 0.16, a: 0.85 },
-      { r: 1.46, w: 2.4, start: 1.05, len: 1.35, speed: -0.11, a: 0.8 },
-      { r: 1.46, w: 2.4, start: 4.2, len: 0.7, speed: -0.11, a: 0.7 },
-      { r: 1.68, w: 1.8, start: 2.2, len: 0.5, speed: 0.07, a: 0.65 },
-      { r: 1.68, w: 1.8, start: 5.1, len: 0.32, speed: 0.07, a: 0.5 },
-      { r: 1.92, w: 1.5, start: 0.8, len: 0.85, speed: -0.05, a: 0.45 },
-      { r: 2.12, w: 1.2, start: 3.3, len: 0.4, speed: 0.09, a: 0.4 },
-    ];
-    this.baseRings = [
-      { r: 1.02, a: 0.28, w: 1.6 },
-      { r: 1.08, a: 0.14, w: 1.1 },
-      { r: 1.28, a: 0.22, w: 1.4 },
-      { r: 1.46, a: 0.16, w: 1.2 },
-      { r: 1.68, a: 0.12, w: 1.0 },
-      { r: 1.92, a: 0.1, w: 0.9 },
-      { r: 2.12, a: 0.07, w: 0.8 },
-    ];
+    this.initRings();
   }
 
   resize() {
-    if (!this.gl) return;
-    this.dpr = Math.min(window.devicePixelRatio || 1, 3);
+    if (!this.mode) return;
+    this.dpr = Math.min(window.devicePixelRatio || 1, this.dprCap);
     const w = Math.round(window.innerWidth * this.dpr);
     const h = Math.round(window.innerHeight * this.dpr);
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
     }
-    this.gl.viewport(0, 0, w, h);
+    if (this.gl) this.gl.viewport(0, 0, w, h);
   }
 
-  // Globe placement in CSS pixels. Animated unless the user prefers reduced motion.
+  // Globe placement in CSS pixels, eased towards the target.
   setGlobe(x, y, r, alpha, instant = false) {
     this.target = { x, y, r, alpha };
-    if (instant || this.reduced || this.globe.r === 0) this.globe = { ...this.target };
+    if (instant || this.globe.r === 0) this.globe = { ...this.target };
     this.kick();
   }
 
   setPhase(phase) {
     this.phase = phase;
-    this.energyTarget = { listening: 0.62, collecting: 0.62, followup: 0.4, thinking: 0.48, speaking: 0.9 }[phase] ?? 0.22;
+    this.energyTarget = RESTING[phase] ?? 0.22;
     this.kick();
   }
 
@@ -390,12 +438,7 @@ export class Scene {
   }
 
   kick() {
-    if (!this.gl || document.hidden) return;
-    if (this.reduced) {
-      this.globe = { ...this.target };
-      this.draw(0);
-      return;
-    }
+    if (!this.mode || document.hidden) return;
     if (!this.frame) {
       this.last = performance.now();
       this.frame = requestAnimationFrame((t) => this.loop(t));
@@ -408,17 +451,37 @@ export class Scene {
   }
 
   loop(now) {
-    const dt = Math.min(0.05, (now - this.last) / 1000);
+    const raw = (now - this.last) / 1000;
+    const dt = Math.min(0.05, Math.max(0, raw));
     this.last = now;
     this.frame = requestAnimationFrame((t) => this.loop(t));
     this.time += dt;
     const k = 1 - Math.exp(-dt * 2.6);
     for (const key of ["x", "y", "r", "alpha"]) this.globe[key] += (this.target[key] - this.globe[key]) * k;
     this.energy += (this.energyTarget - this.energy) * (1 - Math.exp(-dt * 4));
-    const resting = { listening: 0.62, collecting: 0.62, followup: 0.4, thinking: 0.48, speaking: 0.9 }[this.phase] ?? 0.22;
+    const resting = RESTING[this.phase] ?? 0.22;
     this.energyTarget += (resting - this.energyTarget) * (1 - Math.exp(-dt * 1.5));
     this.rot += dt * (0.28 + this.energy * 0.55);
-    this.draw(dt);
+    this.pulse += dt * (0.16 + this.energy * 0.24);
+    this.adapt(raw);
+    if (this.mode === "gl") this.draw();
+    else this.draw2d();
+  }
+
+  // Trades resolution for frame rate on weak or software GPUs so the motion stays fluid.
+  adapt(raw) {
+    if (raw <= 0 || raw > 0.5) return;
+    this.avg += (raw - this.avg) * 0.05;
+    if (++this.frames < 90) return;
+    this.frames = 0;
+    if (this.avg < 1 / 34) return;
+    const current = Math.min(window.devicePixelRatio || 1, this.dprCap);
+    if (current > 1) this.dprCap = Math.max(1, current - 0.5);
+    else if (!this.lite) this.lite = true;
+    else if (current > 0.6) this.dprCap = Math.max(0.6, current - 0.2);
+    else return;
+    this.resize();
+    this.avg = 1 / 60;
   }
 
   draw() {
@@ -437,7 +500,7 @@ export class Scene {
       gl.useProgram(pr.p);
       const mvp = multiply(perspective(0.95, W / H, 0.1, 120), view(-0.08, 1.7));
       gl.uniformMatrix4fv(pr.u.uMVP, false, new Float32Array(mvp));
-      gl.uniform1f(pr.u.uScroll, this.reduced ? 0 : (this.time * 0.7) % 2);
+      gl.uniform1f(pr.u.uScroll, (this.time * 0.7) % 2);
       gl.uniform1f(pr.u.uFar, this.gridFar);
       gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.16 + this.energy * 0.08);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.gridBuf);
@@ -467,7 +530,7 @@ export class Scene {
     const cy = g.y * dpr;
     const R = g.r * dpr;
 
-    // rings
+    // rings, travelling arcs and energy pulses
     {
       const pr = this.progRing;
       gl.useProgram(pr.p);
@@ -479,16 +542,26 @@ export class Scene {
       gl.vertexAttribPointer(pr.a.aT, 1, gl.FLOAT, false, 8, 0);
       gl.vertexAttribPointer(pr.a.aSide, 1, gl.FLOAT, false, 8, 4);
       gl.uniform1f(pr.u.uFade, 0);
+      gl.uniform1f(pr.u.uStart, 0);
+      gl.uniform1f(pr.u.uLen, Math.PI * 2);
       const breathe = 1 + 0.018 * Math.sin(this.time * 1.6);
       for (const ring of this.baseRings) {
         gl.uniform1f(pr.u.uRadius, R * ring.r * breathe);
-        gl.uniform1f(pr.u.uWidth, ring.w * 5.5 * dpr);
-        gl.uniform1f(pr.u.uStart, 0);
-        gl.uniform1f(pr.u.uLen, Math.PI * 2);
-        gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], ring.a * 0.35 * g.alpha);
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.ringCount);
+        if (!this.lite) {
+          gl.uniform1f(pr.u.uWidth, ring.w * 5.5 * dpr);
+          gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], ring.a * 0.35 * g.alpha);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.ringCount);
+        }
         gl.uniform1f(pr.u.uWidth, ring.w * dpr);
         gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], ring.a * g.alpha);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.ringCount);
+      }
+      for (let i = 0; i < 3; i++) {
+        const p = (this.pulse + i / 3) % 1;
+        const fade = (1 - p) * (1 - p) * Math.min(1, p * 8);
+        gl.uniform1f(pr.u.uRadius, R * (1.0 + p * 1.3));
+        gl.uniform1f(pr.u.uWidth, (1.2 + p * 3) * dpr);
+        gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.45 * fade * g.alpha * (0.7 + this.energy));
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.ringCount);
       }
       gl.uniform1f(pr.u.uFade, 1);
@@ -543,16 +616,140 @@ export class Scene {
       gl.enableVertexAttribArray(pr.a.aSeed);
       gl.vertexAttribPointer(pr.a.aPos, 3, gl.FLOAT, false, 16, 0);
       gl.vertexAttribPointer(pr.a.aSeed, 1, gl.FLOAT, false, 16, 12);
-      gl.uniform1f(pr.u.uRot, -this.rot * 0.42);
-      gl.uniform1f(pr.u.uPoint, 3.4);
-      gl.uniform1f(pr.u.uAlpha, g.alpha * 0.28);
-      gl.drawArrays(gl.POINTS, 0, this.globeCount);
+      if (!this.lite) {
+        gl.uniform1f(pr.u.uRot, -this.rot * 0.42);
+        gl.uniform1f(pr.u.uPoint, 3.4);
+        gl.uniform1f(pr.u.uAlpha, g.alpha * 0.28);
+        gl.drawArrays(gl.POINTS, 0, this.globeCount);
+      }
       gl.uniform1f(pr.u.uRot, this.rot);
       gl.uniform1f(pr.u.uPoint, 1.15);
       gl.uniform1f(pr.u.uAlpha, g.alpha);
       gl.drawArrays(gl.POINTS, 0, this.globeCount);
       gl.disableVertexAttribArray(pr.a.aPos);
       gl.disableVertexAttribArray(pr.a.aSeed);
+    }
+  }
+
+  // Same scene drawn with Canvas 2D for browsers without WebGL.
+  draw2d() {
+    const c = this.ctx;
+    const dpr = this.dpr;
+    const w = this.canvas.width / dpr;
+    const h = this.canvas.height / dpr;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.globalCompositeOperation = "source-over";
+    c.fillStyle = "#06080a";
+    c.fillRect(0, 0, w, h);
+    c.globalCompositeOperation = "lighter";
+
+    // floor grid
+    const horizon = h * 0.52;
+    const depth = h - horizon;
+    const focal = depth * 1.2;
+    const far = 40;
+    const fan = c.createLinearGradient(0, horizon, 0, h);
+    fan.addColorStop(0, gold(0));
+    fan.addColorStop(1, gold(0.14 + this.energy * 0.06));
+    c.strokeStyle = fan;
+    c.lineWidth = 1;
+    c.beginPath();
+    for (let x = -30; x <= 30; x++) {
+      c.moveTo(w / 2 + (focal * x * 0.6) / 1.2, h);
+      c.lineTo(w / 2 + (focal * x * 0.6) / far, horizon + focal / far);
+    }
+    c.stroke();
+    const scroll = (this.time * 0.7) % 1;
+    for (let i = 0; i < far; i++) {
+      const z = i + 1.2 - scroll;
+      const y = horizon + focal / z;
+      if (y > h) continue;
+      c.strokeStyle = gold((0.16 + this.energy * 0.06) * (1 - z / far) * Math.min(1, (z - 0.2) * 1.5));
+      c.beginPath();
+      c.moveTo(0, y);
+      c.lineTo(w, y);
+      c.stroke();
+    }
+
+    // dust
+    for (const d of this.dust2d) {
+      const x = (d[0] + Math.sin(this.time * 0.11 + d[2] * 20) * 0.045 + 1) * 0.5 * w;
+      const y = (1 - (d[1] + Math.cos(this.time * 0.09 + d[2] * 13) * 0.045)) * 0.5 * h;
+      const tw = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(this.time * (0.8 + d[2] * 2.2) + d[2] * 50));
+      const s = 1 + d[2] * 2;
+      c.fillStyle = gold(0.5 * tw);
+      c.fillRect(x - s / 2, y - s / 2, s, s);
+    }
+
+    const g = this.globe;
+    if (g.alpha < 0.01 || g.r < 2) return;
+    const { x: cx, y: cy } = g;
+    const R = g.r;
+    const breathe = 1 + 0.018 * Math.sin(this.time * 1.6);
+    const circle = (r, from = 0, to = Math.PI * 2) => {
+      c.beginPath();
+      c.arc(cx, cy, r, from, to);
+      c.stroke();
+    };
+
+    c.lineCap = "round";
+    for (const ring of this.baseRings) {
+      c.strokeStyle = gold(ring.a * g.alpha);
+      c.lineWidth = ring.w;
+      circle(R * ring.r * breathe);
+    }
+    for (let i = 0; i < 3; i++) {
+      const p = (this.pulse + i / 3) % 1;
+      const fade = (1 - p) * (1 - p) * Math.min(1, p * 8);
+      c.strokeStyle = gold(0.45 * fade * g.alpha * (0.7 + this.energy));
+      c.lineWidth = 1.2 + p * 3;
+      circle(R * (1 + p * 1.3));
+    }
+    const speedUp = 1 + this.energy * 4.2;
+    for (const arc of this.arcs) {
+      const start = arc.start + this.time * arc.speed * speedUp;
+      c.strokeStyle = gold(arc.a * g.alpha * (0.75 + this.energy * 0.5));
+      c.lineWidth = arc.w * (1 + this.energy * 0.55);
+      circle(R * arc.r * breathe, start, start + arc.len * (1 + this.energy * 0.3));
+    }
+
+    c.strokeStyle = gold(0.34 * g.alpha);
+    c.lineWidth = 1;
+    c.beginPath();
+    const tickRot = this.time * 0.08;
+    for (let i = 0; i < 120; i++) {
+      const a = (i / 120) * Math.PI * 2 + tickRot;
+      const len = R * 0.045 * (i % 5 === 0 ? 1 : 0.45);
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      c.moveTo(cx + ca * R * 2.28, cy + sa * R * 2.28);
+      c.lineTo(cx + ca * (R * 2.28 + len), cy + sa * (R * 2.28 + len));
+    }
+    c.stroke();
+
+    const cr = Math.cos(this.rot);
+    const sr = Math.sin(this.rot);
+    const tilt = 0.38 + 0.06 * Math.sin(this.time * 0.35);
+    const ct = Math.cos(tilt);
+    const st = Math.sin(tilt);
+    const scale = Math.min(2.2, Math.max(0.7, R / 280));
+    const buckets = [[], [], [], []];
+    const p = this.pts2d;
+    for (let i = 0; i < p.length; i += 3) {
+      const x0 = cr * p[i] + sr * p[i + 2];
+      const z0 = -sr * p[i] + cr * p[i + 2];
+      const y = ct * p[i + 1] - st * z0;
+      const z = st * p[i + 1] + ct * z0;
+      const persp = 1 / (1 - z * 0.28);
+      buckets[Math.min(3, Math.floor((z + 1) * 2))].push(cx + x0 * R * persp, cy - y * R * persp);
+    }
+    for (let b = 0; b < 4; b++) {
+      const front = (b + 0.5) / 4;
+      const alpha = (0.16 + 0.84 * front * front) * g.alpha * (0.85 + this.energy * 0.4);
+      const s = (0.85 + 1.7 * front) * scale * (1 + this.energy * 0.45) * 1.2;
+      c.fillStyle = gold(Math.min(1, alpha));
+      const list = buckets[b];
+      for (let i = 0; i < list.length; i += 2) c.fillRect(list[i] - s / 2, list[i + 1] - s / 2, s, s);
     }
   }
 }

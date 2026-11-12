@@ -68,7 +68,7 @@ export default function micsPage(view, ctx) {
   const volLabel = h("span", { class: "gold-text" }, "");
   const silence = h("input", { type: "range", min: "0", max: "2000", step: "100" });
   const silenceLabel = h("span", { class: "gold-text" }, "");
-  const testArea = selectEl([], "");
+  const testArea = selectEl([], "", { style: { flex: "1 1 140px", width: "auto", "min-width": "0" } });
   const testBtn = h("button", { class: "btn", type: "button" }, "Testansage");
   const saveVoice = h("button", { class: "btn primary", type: "button" }, "Speichern");
   const bind = (input, label, fmt) => {
@@ -99,7 +99,7 @@ export default function micsPage(view, ctx) {
       h("div", { class: "label" }, "Erkennung"),
       stt,
     ),
-    h("div", { class: "row", style: { "margin-top": "16px" } }, testArea, testBtn, h("span", { class: "spacer" }), saveVoice),
+    h("div", { class: "row wrap", style: { "margin-top": "16px" } }, testArea, testBtn, saveVoice),
   );
   root.append(h("div", { class: "grid mics-top", style: { "margin-top": "clamp(14px, 1.2vw, 24px)" } }, waveCard, config));
 

@@ -183,7 +183,7 @@ export default function loxonePage(view, ctx) {
     selected = group;
     for (const [id, node] of Object.entries(nodes)) node.classList.toggle("active", id === group);
     renderDevices();
-    devicesCard.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    devicesCard.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function renderDevices() {

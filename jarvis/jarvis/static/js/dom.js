@@ -82,13 +82,12 @@ export function confirmDialog(title, text, label = "Bestätigen") {
 }
 
 export function countUp(el, to, { duration = 1100, decimals = 0 } = {}) {
-  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const target = Number(to);
   if (!Number.isFinite(target)) {
     el.textContent = to ?? "–";
     return;
   }
-  if (reduced || el.dataset.counted === "1") {
+  if (el.dataset.counted === "1") {
     el.textContent = target.toFixed(decimals);
     return;
   }

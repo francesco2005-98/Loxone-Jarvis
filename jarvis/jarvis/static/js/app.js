@@ -20,6 +20,8 @@ const phases = {};
 let scene;
 let current = null;
 let entered = false;
+let routeToken = 0;
+const LEAVE_MS = 260;
 
 const ctx = {
   api,
@@ -79,20 +81,31 @@ function moveUnderline(button) {
   bar.style.setProperty("transform", `translateX(${button.offsetLeft}px)`);
 }
 
-function route() {
+async function route() {
   const hash = location.hash.replace("#", "") || "uebersicht";
   const id = ORDER.find((key) => PAGES[key].hash === hash) || "overview";
   if (current && current.id === id) return;
-  if (current && current.instance.destroy) current.instance.destroy();
-  const view = clear($("#view"));
+  const token = ++routeToken;
   for (const btn of document.querySelectorAll("#nav button")) btn.classList.toggle("active", btn.dataset.page === id);
   moveUnderline(document.querySelector(`#nav button[data-page="${id}"]`));
   $("#foot-center").textContent = PAGES[id].footer;
   $("#foot-progress").style.setProperty("width", `${((ORDER.indexOf(id) + 1) / ORDER.length) * 100}%`);
   if (id !== "overview") backgroundGlobe();
+  const leaving = current;
+  current = null;
+  if (leaving) {
+    if (leaving.instance.destroy) leaving.instance.destroy();
+    const old = $("#view").firstElementChild;
+    if (old) {
+      old.classList.add("leaving");
+      await new Promise((r) => setTimeout(r, LEAVE_MS));
+      if (token !== routeToken) return;
+    }
+  }
+  const view = clear($("#view"));
   const instance = PAGES[id].module(view, ctx) || {};
   current = { id, instance };
-  window.scrollTo({ top: 0 });
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function clock() {
