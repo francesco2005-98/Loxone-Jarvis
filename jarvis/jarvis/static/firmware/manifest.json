@@ -1,9 +1,9 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "esphome": "2026.10.2",
   "factory": "jarvis-mic.factory.bin",
   "ota": "jarvis-mic.ota.bin",
-  "ota_md5": "6ab2f021f622474eb0f250cb8aea3329",
-  "built": "2026-11-12T16:12:25Z",
-  "commit": "04ee9f0e18abd980bf3d8c9a849306c26f0ed60c"
+  "ota_md5": "03b4192384ee34e79acd4fe9ce2fdb27",
+  "built": "2026-11-12T20:53:35Z",
+  "commit": "a83da495f998ad834f7922254ab6b4dd93907a56"
 }
