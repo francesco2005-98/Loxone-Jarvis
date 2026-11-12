@@ -12,7 +12,7 @@ Sprachassistent mit Jarvis-Persönlichkeit für ein Loxone-Haus. Wakeword-Mikrof
 
 | Dienst | Aufgabe | Port |
 |---|---|---|
-| `jarvis` | Oberfläche, Mikrofone, Erkennung, Gemini, Loxone, Audioserver, Config-MCP | 8500 (über Coolify mit HTTPS), 8765 (nur für die Mikrofone im Hausnetz) |
+| `jarvis` | Oberfläche, Mikrofone, Erkennung, Gemini, Loxone, Audioserver, Config-MCP | 8500 (direkt `http://<Server>:8500`, optional HTTPS über eine Domain), 8765 (nur für die Mikrofone im Hausnetz) |
 | `piper` | Sprachausgabe, nur intern | 5000 |
 
 Daten liegen im Volume `jarvis-data` (SQLite). Zugangsdaten sind dort mit AES-GCM verschlüsselt, der Schlüssel kommt aus `JARVIS_SECRET_KEY` und liegt nur in Coolify.
@@ -21,9 +21,9 @@ Daten liegen im Volume `jarvis-data` (SQLite). Zugangsdaten sind dort mit AES-GC
 
 1. Neue Ressource → **Docker Compose** → dieses GitHub-Repo, Branch `main`, Datei `docker-compose.yml`.
 2. Umgebungsvariable `JARVIS_SECRET_KEY` als Secret setzen, zum Beispiel aus `openssl rand -base64 48`. Den Wert aufbewahren: ohne ihn lassen sich die gespeicherten Zugänge nicht mehr entschlüsseln.
-3. Beim Dienst `jarvis` eine Domain mit Port eintragen, zum Beispiel `https://jarvis.example.lan:8500`. Pair braucht HTTPS.
+3. Keine Domain nötig. Nach dem Deploy die Oberfläche im Hausnetz unter `http://<IP-des-Servers>:8500` öffnen. Eine Domain mit HTTPS ist nur für Pair (USB-Flash im Browser) nötig, zum Beispiel `https://jarvis.example.lan`.
 4. Deployen. Der erste Bau lädt Whisper-Modelle, das Sprechermodell und die Piper-Stimmen in die Images (einige Minuten, danach braucht der Betrieb kein Internet außer Gemini).
-5. Die Seite im Hausnetz öffnen und das Oberflächen-Passwort festlegen (mindestens 10 Zeichen).
+5. Die Seite öffnen und das Oberflächen-Passwort festlegen (mindestens 10 Zeichen).
 
 Jarvis antwortet nur Adressen aus privaten Netzen, auch hinter dem Coolify-Proxy. Keine Portweiterleitung im Router einrichten. Wer zusätzlich sperren will: ausgehend nur `generativelanguage.googleapis.com` erlauben.
 

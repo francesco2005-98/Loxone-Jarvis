@@ -1,6 +1,7 @@
 # One Coolify application: "Docker Compose" build pack, this repository.
-# In Coolify set the domain of the service "jarvis" to https://<name>:8500 and the
-# environment variable JARVIS_SECRET_KEY as a secret. Everything else is set in the web interface.
+# Without a domain the web interface is http://<server>:8500.
+# A domain is only needed for HTTPS (microphone pairing). Set JARVIS_SECRET_KEY
+# as a secret. Everything else is set in the web interface.
 
 services:
   jarvis:
@@ -13,13 +14,15 @@ services:
       JARVIS_TRUSTED_NETWORKS: ${JARVIS_TRUSTED_NETWORKS:-}
       JARVIS_PIPER_URL: http://piper:5000
       JARVIS_HTTP_PORT: ${JARVIS_HTTP_PORT:-8500}
+      # Session cookie over plain HTTP, so http://<server>:8500 can log in.
+      JARVIS_INSECURE_COOKIES: ${JARVIS_INSECURE_COOKIES:-1}
       TZ: ${TZ:-Europe/Berlin}
     volumes:
       - jarvis-data:/data
-    expose:
-      - "8500"
     ports:
-      # Only the microphones use this port: address hello and firmware updates.
+      # Web interface, reachable on the host without a domain.
+      - "${JARVIS_HTTP_PORT:-8500}:${JARVIS_HTTP_PORT:-8500}"
+      # Microphones: address hello and firmware updates.
       - "${JARVIS_DEVICE_PORT:-8765}:8765"
     depends_on:
       piper:

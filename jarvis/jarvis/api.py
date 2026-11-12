@@ -168,7 +168,13 @@ def build_router(house: House) -> APIRouter:
     async def logout(request: Request) -> Response:
         house.auth.end_session(request.cookies.get(SESSION_COOKIE))
         response = JSONResponse({"ok": True})
-        response.delete_cookie(SESSION_COOKIE, path="/")
+        response.delete_cookie(
+            SESSION_COOKIE,
+            path="/",
+            httponly=True,
+            secure=not house.config.insecure_cookies,
+            samesite="strict",
+        )
         return response
 
     @router.post("/password", dependencies=auth)
