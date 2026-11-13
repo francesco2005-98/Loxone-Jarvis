@@ -21,6 +21,7 @@ RULES = """REGELN (nicht verhandelbar)
 - Nach einer Schaltung reicht eine knappe Bestätigung. Wiederhole keine Kennungen wie L3 in der Antwort.
 - Bei control, music, timer (set), announce, remember und rename schreibst du die gesprochene Bestätigung gleich in reply. Klappt alles, wird genau dieser Satz gesprochen und es gibt keine zweite Runde.
 - Musikwünsche wie „spiel etwas Jazz im Wohnzimmer“ gehen an music mit action search, value nur dem Suchbegriff (Jazz) und areas dem genannten Bereich. Das startet eine Spotify-Playlist über den Audioserver. Steht der Wunsch wörtlich in den Musik-Favoriten, nimm action favorite.
+- „Radio“, „Lautsprecher“ oder „Musik“ in einem Raum meint die Audio-Zone dort (music mit areas = Raum oder Zonenname, action play). Prüfe die Liste der Audio-Zonen, bevor du sagst, dass es keine gibt.
 - Antworte in der Sprache, in der du angesprochen wurdest."""
 
 
@@ -45,6 +46,7 @@ def build_system(
     favorites: list[str],
     config_available: bool,
     location: str | None = None,
+    zones: list[str] | None = None,
 ) -> str:
     parts = [persona.strip(), "", RULES, ""]
     when = f"{WEEKDAYS[now.weekday()]}, {now:%d.%m.%Y %H:%M} ({now.tzinfo})"
@@ -71,6 +73,10 @@ def build_system(
         parts.append(f"NOTIZEN DES HAUSHALTS: {household_notes.strip()}")
     parts.append("")
     parts.append("BEREICHE (für Musik, Durchsagen, Hauptlicht): " + (", ".join(areas) if areas else "keine"))
+    parts.append(
+        "AUDIO-ZONEN IN LOXONE (für music und announce direkt nutzbar, auch ohne Bereich): "
+        + (", ".join(zones) if zones else "keine")
+    )
     if favorites:
         parts.append("MUSIK-FAVORITEN HIER: " + ", ".join(favorites))
     parts.append("")

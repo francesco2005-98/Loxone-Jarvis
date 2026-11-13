@@ -192,6 +192,7 @@ class Brain:
             favorites=house.cached_favorites(area),
             config_available=config_available,
             location=self.location_line(),
+            zones=[f"{z.name} (Raum {z.room})" if z.room and z.room != z.name else z.name for z in house.miniserver.structure.zones()],
         )
 
     def location_line(self) -> str | None:
