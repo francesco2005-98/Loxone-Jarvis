@@ -252,3 +252,39 @@ def test_quick_parser_takes_only_plain_sentences():
     assert parse("turn on the lights in the kitchen").action == "on"
     assert parse("Mach das Licht im Esszimmer an und die Rollos runter") is None
     assert parse("Dimm das Licht im Esszimmer auf 30 Prozent") is None
+
+
+ZONES = {
+    "rooms": {"r-ess": {"name": "Esszimmer"}, "r-bad": {"name": "Bad OG"}},
+    "mediaServer": {"as": {"type": 2, "host": "192.168.1.40"}},
+    "controls": {
+        "z-ess": {"name": "Esszimmer", "type": "AudioZoneV2", "uuidAction": "z-ess", "room": "r-ess", "details": {"playerid": 4, "server": "as"}},
+        "z-bad": {"name": "Lautsprecher Bad", "type": "AudioZoneV2", "uuidAction": "z-bad", "room": "r-bad", "details": {"playerid": 5, "server": "as"}},
+    },
+}
+
+
+def test_loxone_audio_zone_plays_without_a_bereich(setup):
+    house, area, dimmer, gate, sent = setup
+    house.miniserver.structure = parse(ZONES)
+    turn = Turn(area=area, lang="de", text="mach das Radio im Esszimmer an")
+    result = run(house.brain.runner._tool_music({"action": "play", "areas": ["Esszimmer"]}, turn))
+    assert result["results"] == [{"area": "Esszimmer", "ok": True}]
+    assert sent[-1] == ("z-ess", "play")
+    run(house.brain.runner._tool_music({"action": "pause", "areas": ["im Bad OG"]}, turn))
+    assert sent[-1] == ("z-bad", "pause"), "the room name finds the zone too"
+    failed = run(house.brain.runner.run("music", {"action": "play", "areas": ["Dachboden"]}, turn))
+    assert "Esszimmer" in failed["error"] and "Lautsprecher Bad" in failed["error"]
+    targets = house.brain.runner._target_areas(["alle"], turn)
+    assert {t.zone_uuid for t in targets} == {"z-ess", "z-bad"}
+
+
+def test_bereich_with_zone_wins_and_gemini_sees_all_zones(setup):
+    house, area, dimmer, gate, sent = setup
+    house.miniserver.structure = parse(ZONES)
+    dining = house.areas.create("Essbereich")
+    dining = house.areas.update(dining.id, zone_uuid="z-ess")
+    targets = house.brain.runner._target_areas(["Esszimmer", "Essbereich"], Turn(area=area, lang="de", text=""))
+    assert [t.id for t in targets] == [dining.id], "same zone only once, as the Bereich"
+    system = house.brain.system_for(Turn(area=area, lang="de", text=""), False)
+    assert "AUDIO-ZONEN IN LOXONE" in system and "Esszimmer" in system and "Lautsprecher Bad (Raum Bad OG)" in system

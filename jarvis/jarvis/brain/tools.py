@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -72,7 +73,8 @@ DECLARATIONS: list[dict] = [
     {
         "name": "music",
         "description": (
-            "Musik über den Loxone Audioserver. Ohne Bereich gilt der Bereich, in dem gesprochen wurde. "
+            "Musik über den Loxone Audioserver, auch „Radio“, „Lautsprecher“ oder „Musik“ genannt. "
+            "areas nimmt Bereiche oder Audio-Zonen aus Loxone (Name oder Raum). Ohne Angabe gilt der Bereich, in dem gesprochen wurde. "
             "Für „spiel Jazz“, einen Künstlernamen oder eine Playlist action=search und value=nur der Suchbegriff, "
             "z. B. Jazz. Das startet die passende Spotify-Playlist in der Zone. "
             "Gespeicherte Favoriten bleiben action=favorite."
@@ -91,7 +93,7 @@ DECLARATIONS: list[dict] = [
     },
     {
         "name": "announce",
-        "description": "Durchsage in einem, mehreren oder allen Bereichen (areas: [\"alle\"]).",
+        "description": "Durchsage in einem, mehreren oder allen Bereichen oder Audio-Zonen (areas: [\"alle\"]).",
         "parameters_json_schema": _schema(
             {
                 "text": {"type": "string", "description": "Was gesagt werden soll, fertig formuliert"},
@@ -243,18 +245,34 @@ class ToolRunner:
 
     # ---------------------------------------------------------------- music
     def _target_areas(self, names: list[str] | None, turn: Turn) -> list[Area]:
+        """Bereiche or Loxone audio zones by name; a zone without a Bereich still plays."""
         if not names:
             return [turn.area]
         if any(str(n).strip().lower() in ("alle", "all", "überall", "everywhere", "haus") for n in names):
-            return [a for a in self.house.areas.list() if a.zone_uuid]
+            return self._all_zone_targets()
         found: list[Area] = []
         for name in names:
             area = self.house.areas.find(str(name))
+            if area is None or not area.zone_uuid:
+                zone = find_zone(self.house.miniserver.structure.zones(), str(name))
+                if zone is not None:
+                    area = self._zone_target(zone)
             if area is None:
-                raise ActionError(f"Bereich '{name}' gibt es nicht")
-            if area not in found:
+                known = ", ".join(z.name for z in self.house.miniserver.structure.zones()) or "keine"
+                raise ActionError(f"'{name}' gibt es weder als Bereich noch als Audio-Zone. Audio-Zonen: {known}")
+            duplicate = any(a.id == area.id or (area.zone_uuid and a.zone_uuid == area.zone_uuid) for a in found)
+            if not duplicate:
                 found.append(area)
         return found
+
+    def _zone_target(self, zone) -> Area:
+        for area in self.house.areas.list():
+            if area.zone_uuid == zone.uuid:
+                return area
+        return Area(f"zone:{zone.uuid}", zone.name, zone.uuid, None, [zone.room] if zone.room else [])
+
+    def _all_zone_targets(self) -> list[Area]:
+        return [self._zone_target(zone) for zone in self.house.miniserver.structure.zones()]
 
     async def _tool_music(self, args: dict, turn: Turn) -> dict:
         house = self.house
@@ -391,3 +409,22 @@ class ToolRunner:
         if self.config_task is None:
             raise ActionError("Loxone Config ist nicht verbunden")
         return await self.config_task(str(args.get("task", "")), turn)
+
+
+def _key(text: str) -> str:
+    return re.sub(r"[^a-z0-9äöüß]", "", (text or "").lower())
+
+
+def find_zone(zones: list, name: str):
+    """An audio zone by its name or its room, exact first, then contained either way."""
+    wanted = _key(re.sub(r"^(im|in der|in dem|in|am|auf der|auf dem)\s+", "", name.strip().lower()))
+    if not wanted:
+        return None
+    for zone in zones:
+        if wanted in (_key(zone.name), _key(zone.room or "")):
+            return zone
+    for zone in zones:
+        names = [_key(zone.name), _key(zone.room or "")]
+        if any(n and len(wanted) >= 3 and (wanted in n or n in wanted) for n in names):
+            return zone
+    return None
