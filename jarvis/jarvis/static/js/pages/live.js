@@ -3,6 +3,15 @@ import { h } from "../dom.js";
 // Live: this device is microphone and speaker. The microphone is only open while this page is.
 const AREA_KEY = "jarvis.live.area";
 const MENU_MS = 6000;
+// Local voice detection on 100 ms packets: the globe notices a voice before the server has heard the wake word.
+const VOICE_FLOOR = 0.012;
+const VOICE_RATIO = 3.2;
+const VOICE_ON_PACKETS = 2;
+const VOICE_OFF_PACKETS = 8;
+
+const installed = () =>
+  window.matchMedia("(display-mode: fullscreen)").matches || window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 export default function live(view, ctx) {
   const root = h("div", { class: "page live-page" });
@@ -13,7 +22,17 @@ export default function live(view, ctx) {
   const clockDate = h("div", { class: "d" });
   const notice = h("div", { class: "live-notice" });
   const areaSelect = h("select", { class: "select" }, h("option", { value: "" }, "Kein Raum"));
-  const panel = h("div", { class: "live-panel" }, h("span", { class: "label" }, "Raum für Sätze ohne Raumangabe"), areaSelect);
+  const installBtn = h("button", { class: "btn primary", type: "button" }, "Als App installieren");
+  const installHint = h("p", { class: "hint" }, "");
+  const installBox = h("div", { class: "stack live-install" }, installBtn, installHint);
+  const panel = h(
+    "div",
+    { class: "live-panel" },
+    h("span", { class: "label" }, "Raum für Sätze ohne Raumangabe"),
+    areaSelect,
+    installBox,
+    h("a", { class: "hint", href: "/jarvis-ca.crt" }, "Zertifikat für dieses Gerät laden"),
+  );
   const version = document.querySelector("#foot-left");
   root.append(
     h("div", { class: "live-version" }, version ? version.textContent : "JARVIS OS"),
@@ -34,6 +53,10 @@ export default function live(view, ctx) {
   let wakeLock = null;
   let playing = Promise.resolve();
   let fullscreen = false;
+  let noise = VOICE_FLOOR;
+  let voicePackets = 0;
+  let quietPackets = 0;
+  let attention = false;
 
   // ------------------------------------------------------------ clock
   const tick = () => {
@@ -46,17 +69,58 @@ export default function live(view, ctx) {
 
   // ------------------------------------------------------------- globe
   const place = (instant = false) => {
-    const w = window.innerWidth;
-    const hh = window.innerHeight;
-    ctx.placeGlobe(w / 2, hh * 0.44, Math.min(w, hh) * 0.3, 1, instant);
+    const { w, h: hh } = ctx.viewport();
+    const portrait = hh > w * 1.2;
+    ctx.placeGlobe(w / 2, hh * (portrait ? 0.42 : 0.44), Math.min(w, hh) * (portrait ? 0.34 : 0.3), 1, instant);
   };
   place();
 
   function setPhase(next) {
     phase = next;
     root.dataset.phase = next;
-    ctx.livePhase(next === "connecting" ? "idle" : next);
+    if (next !== "idle") attention = false;
+    ctx.livePhase(next === "connecting" ? "idle" : attention ? "attention" : next);
   }
+
+  function hearLocally(level) {
+    const loud = level > Math.max(VOICE_FLOOR, noise * VOICE_RATIO);
+    if (!loud) noise += (level - noise) * 0.05;
+    voicePackets = loud ? voicePackets + 1 : 0;
+    quietPackets = loud ? 0 : quietPackets + 1;
+    if (phase !== "idle" || muted) return;
+    if (!attention && voicePackets >= VOICE_ON_PACKETS) {
+      attention = true;
+      ctx.livePhase("attention");
+    } else if (attention && quietPackets >= VOICE_OFF_PACKETS) {
+      attention = false;
+      ctx.livePhase("idle");
+    }
+    if (attention) ctx.liveLevel(level * 3);
+  }
+
+  function refreshInstall() {
+    const canPrompt = !!ctx.installPrompt && !installed();
+    installBtn.style.setProperty("display", canPrompt ? "" : "none");
+    installHint.textContent = installed()
+      ? ""
+      : isIos()
+        ? "Als App: in Safari auf Teilen tippen, dann „Zum Home-Bildschirm“."
+        : canPrompt
+          ? ""
+          : "Als App: im Browsermenü „App installieren“ oder „Zum Startbildschirm hinzufügen“.";
+    installBox.style.setProperty("display", installed() ? "none" : "");
+  }
+  refreshInstall();
+  window.addEventListener("jarvis:installable", refreshInstall);
+  installBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const prompt = ctx.installPrompt;
+    if (!prompt) return;
+    ctx.installPrompt = null;
+    prompt.prompt();
+    await prompt.userChoice.catch(() => null);
+    refreshInstall();
+  });
 
   function showNotice(content) {
     notice.replaceChildren(...(Array.isArray(content) ? content : [content]));
@@ -99,8 +163,17 @@ export default function live(view, ctx) {
     const url = port ? `https://${location.hostname}:${port}/#live` : null;
     showNotice([
       h("div", { class: "big" }, "Mikrofon braucht HTTPS"),
-      h("p", {}, url ? "Öffne Live über die sichere Adresse und bestätige das Zertifikat einmal. Danach hört Jarvis hier auf sein Wakeword." : "Der Browser gibt das Mikrofon nur über HTTPS frei."),
-      url ? h("a", { class: "btn primary", href: url, style: { "text-transform": "none" } }, url.replace("/#live", "")) : null,
+      h(
+        "p",
+        {},
+        url
+          ? "Einmal pro Gerät: Zertifikat laden und als vertrauenswürdig installieren, dann Live über die sichere Adresse öffnen. Danach gibt es keine Warnung mehr und Jarvis lässt sich als App installieren."
+          : "Der Browser gibt das Mikrofon nur über HTTPS frei.",
+      ),
+      url ? h("div", { class: "row wrap", style: { "justify-content": "center" } },
+        h("a", { class: "btn", href: "/jarvis-ca.crt" }, "1 · Zertifikat laden"),
+        h("a", { class: "btn primary", href: url, style: { "text-transform": "none" } }, `2 · ${url.replace("/#live", "")}`),
+      ) : null,
     ]);
   }
 
@@ -112,7 +185,7 @@ export default function live(view, ctx) {
     }
     started = true;
     showNotice(null);
-    if (fromTap && document.documentElement.requestFullscreen && !document.fullscreenElement) {
+    if (fromTap && !installed() && document.documentElement.requestFullscreen && !document.fullscreenElement) {
       document.documentElement.requestFullscreen().then(() => (fullscreen = true)).catch(() => {});
     }
     try {
@@ -139,7 +212,8 @@ export default function live(view, ctx) {
     sink.connect(audio.destination);
     node.port.onmessage = (event) => {
       const { pcm, level } = event.data;
-      if (phase === "listening" || phase === "followup") ctx.liveLevel(level * 5);
+      hearLocally(level);
+      if (phase === "listening" || phase === "followup") ctx.liveLevel(level * 3);
       if (!muted && ws && ws.readyState === 1 && phase !== "thinking" && phase !== "speaking") ws.send(pcm);
     };
     await audio.resume().catch(() => {});
@@ -210,7 +284,7 @@ export default function live(view, ctx) {
         analyser.getFloatTimeDomainData(data);
         let sum = 0;
         for (const v of data) sum += v * v;
-        ctx.liveLevel(Math.sqrt(sum / data.length) * 4);
+        ctx.liveLevel(Math.sqrt(sum / data.length) * 2.2);
         raf = requestAnimationFrame(meter);
       };
       await new Promise((resolve) => {
@@ -249,6 +323,7 @@ export default function live(view, ctx) {
       clearTimeout(retry);
       clearTimeout(menuTimer);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("jarvis:installable", refreshInstall);
       if (ws) ws.close();
       if (stream) stream.getTracks().forEach((t) => t.stop());
       if (audio) audio.close().catch(() => {});

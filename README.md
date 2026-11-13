@@ -38,7 +38,14 @@ Jarvis antwortet nur Adressen aus privaten Netzen, auch hinter dem Coolify-Proxy
 4. **Pair:** Board per USB an den Rechner mit Chrome oder Edge, „Pair“. Über `http://<IP>:8500` lädt die Seite einmal `jarvis-pair.py`. Das Programm mit `python3 jarvis-pair.py` starten (Windows: `py -3 jarvis-pair.py`). Es öffnet eine lokale Seite, schreibt die Firmware, übergibt das WLAN, und Jarvis setzt einen eigenen Schlüssel. Danach USB ab, Board an ein USB-C-Netzteil im Raum, Bereich zuordnen.
 5. **Übersicht:** Personen mit Anrede (Name, Sir, Mam) und Notizen anlegen, optional Stimmprofil mit drei Sätzen aufnehmen. Notizen des Haushalts und Zeitzone.
 6. Optional **Loxone Config · MCP:** In Config den MCP-Server in der Titelleiste einschalten und die Adresse eintragen. Dann legt Jarvis neue Logik an, nach Ansage und „Ja“. Bietet Config ein Werkzeug zum Speichern auf den Miniserver an, nutzt Jarvis es, sonst bleibt die Änderung im offenen Projekt.
-7. Optional **Live auf Tablet oder Handy:** `https://<IP-des-Servers>:8501/#live` öffnen, die Zertifikatswarnung einmal bestätigen („Erweitert“ → „Weiter“), anmelden und das Mikrofon erlauben. Browser geben das Mikrofon nur über HTTPS frei, darum der zweite Port. Danach „Jarvis, …“ sagen. Im Menü (Tippen) lässt sich ein Raum für Sätze ohne Raumangabe wählen. Timer und Erinnerungen aus Live klingeln auf dem Gerät, solange Live offen ist, sonst über den Audioserver.
+7. Optional **Live auf Tablet oder Handy, als App:**
+   - Einmal pro Gerät das Zertifikat von Jarvis installieren: `http://<IP-des-Servers>:8500/jarvis-ca.crt` öffnen.
+     - **Android:** Einstellungen → Sicherheit → Verschlüsselung und Anmeldedaten → Zertifikat installieren → CA-Zertifikat → `jarvis-ca.crt`.
+     - **iPhone/iPad:** Profil laden, unter Einstellungen → Allgemein → VPN und Geräteverwaltung installieren, dann unter Allgemein → Info → Zertifikatsvertrauenseinstellungen „Jarvis Hausnetz“ einschalten.
+   - Danach `https://<IP-des-Servers>:8501/#live` öffnen (ohne Warnung), anmelden, Mikrofon erlauben.
+   - **Als App:** Chrome „App installieren“ (auch über das Menü in Live, Tippen blendet es ein), Safari Teilen → „Zum Home-Bildschirm“. Die App heißt „Jarvis“, startet direkt in Live und im Vollbild.
+   - Das Zertifikat deckt automatisch jede Adresse ab, unter der Jarvis geöffnet wurde. Ohne Installation geht Live auch mit einmal bestätigter Warnung, dann aber nicht als App.
+   - Im Menü lässt sich ein Raum für Sätze ohne Raumangabe wählen. Timer und Erinnerungen aus Live klingeln auf dem Gerät, solange Live offen ist, sonst über den Audioserver.
 
 ## Mikrofon kaufen
 

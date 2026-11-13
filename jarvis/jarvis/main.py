@@ -9,7 +9,7 @@ import os
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .api import build_router
@@ -17,7 +17,7 @@ from .config import Config
 from .device_api import create_device_app
 from .house import STATIC_DIR, House
 from .security import HardeningMiddleware, LanOnlyMiddleware
-from .tls import ensure_certificate
+
 
 log = logging.getLogger("jarvis")
 
@@ -27,17 +27,53 @@ def create_app(house: House) -> FastAPI:
     app.add_middleware(HardeningMiddleware)
     app.add_middleware(LanOnlyMiddleware, networks=house.config.trusted_networks)
     app.include_router(build_router(house))
+    app.add_middleware(_HostObserver, certs=house.certs)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    async def manifest() -> FileResponse:
+        return FileResponse(
+            STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json", headers={"Cache-Control": "no-cache"}
+        )
+
+    @app.get("/sw.js", include_in_schema=False)
+    async def service_worker() -> FileResponse:
+        return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/jarvis-ca.crt", include_in_schema=False)
+    async def ca_certificate() -> Response:
+        if not house.certs.ca_cert.exists():
+            return Response("HTTPS ist ausgeschaltet", status_code=404)
+        return Response(
+            house.certs.ca_cert.read_bytes(),
+            media_type="application/x-x509-ca-cert",
+            headers={"Content-Disposition": 'attachment; filename="jarvis-ca.crt"', "Cache-Control": "no-cache"},
+        )
+
     @app.get("/health", include_in_schema=False)
     async def health() -> dict:
         return {"ok": True}
 
     return app
+
+
+class _HostObserver:
+    """Every address the interface is opened with ends up in the HTTPS certificate."""
+
+    def __init__(self, app, certs):
+        self.app = app
+        self.certs = certs
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] in ("http", "websocket") and self.certs.ready:
+            host = dict(scope.get("headers") or []).get(b"host", b"").decode("latin-1")
+            if host:
+                self.certs.observe(host)
+        await self.app(scope, receive, send)
 
 
 class _SecondaryServer(uvicorn.Server):
@@ -78,12 +114,13 @@ async def serve() -> None:
     device_task = asyncio.create_task(devices.serve())
     secondary = [(devices, device_task)]
     log.info("Weboberfläche erreichbar auf Port %s", config.http_port)
-    secure = _secure_server(app, config)
+    secure = _secure_server(app, config, house)
     if secure is not None:
         secondary.append((secure, asyncio.create_task(secure.serve())))
         log.info(
-            "Live-Modus mit Mikrofon über HTTPS auf Port %s (Zertifikat im Browser einmal bestätigen)",
+            "Live-Modus und App über HTTPS auf Port %s. Zertifikat einmal pro Gerät installieren: http://<Server>:%s/jarvis-ca.crt",
             config.https_port,
+            config.http_port,
         )
     try:
         await main.serve()
@@ -96,15 +133,15 @@ async def serve() -> None:
         await house.stop()
 
 
-def _secure_server(app: FastAPI, config: Config) -> uvicorn.Server | None:
+def _secure_server(app: FastAPI, config: Config, house: House) -> uvicorn.Server | None:
     if not config.https_port:
         return None
     try:
-        cert, key = ensure_certificate(config.data_dir / "tls")
+        cert, key = house.certs.ensure()
     except Exception as exc:  # noqa: BLE001
         log.warning("HTTPS nicht verfügbar, Live-Modus ohne Mikrofon: %s", exc)
         return None
-    return _SecondaryServer(
+    server = _SecondaryServer(
         uvicorn.Config(
             app,
             host="0.0.0.0",
@@ -116,6 +153,15 @@ def _secure_server(app: FastAPI, config: Config) -> uvicorn.Server | None:
             ws_max_size=1 << 20,
         )
     )
+
+    def reload() -> None:
+        # New handshakes pick up the re-signed certificate; open connections keep theirs.
+        context = getattr(server.config, "ssl", None)
+        if context is not None:
+            context.load_cert_chain(str(house.certs.cert), str(house.certs.key))
+
+    house.certs.on_change(reload)
+    return server
 
 
 def run() -> None:

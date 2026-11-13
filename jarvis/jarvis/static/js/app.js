@@ -41,19 +41,21 @@ const ctx = {
     if (scene) scene.setPhase(phase ?? dominantPhase());
   },
   liveLevel: (level) => scene && scene.level(level),
+  viewport: () => viewport(),
+  installPrompt: null,
   httpsPort: null,
   phases,
 };
 
+const viewport = () => (scene ? scene.size() : { w: window.innerWidth, h: window.innerHeight });
+
 function gateGlobe(instant = false) {
-  const w = window.innerWidth;
-  const hgt = window.innerHeight;
+  const { w, h: hgt } = viewport();
   scene.setGlobe(w / 2, hgt * 0.42, Math.min(w, hgt) * 0.3, 1, instant);
 }
 
 function backgroundGlobe() {
-  const w = window.innerWidth;
-  const hgt = window.innerHeight;
+  const { w, h: hgt } = viewport();
   scene.setGlobe(w * 0.78, hgt * 0.52, Math.min(w, hgt) * 0.38, 0.62);
 }
 
@@ -176,7 +178,14 @@ function showGate(setup) {
   });
 }
 
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  ctx.installPrompt = event;
+  window.dispatchEvent(new CustomEvent("jarvis:installable"));
+});
+
 async function boot() {
+  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
   scene = new Scene($("#scene"));
   gateGlobe(true);
   for (const btn of document.querySelectorAll("#nav button")) {

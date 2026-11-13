@@ -30,6 +30,11 @@ log = logging.getLogger(__name__)
 LISTEN_SECONDS = 8.0
 MAX_BACKLOG = 2
 PREROLL_FRAMES = 10
+# While a sentence is still running, the start is checked for the wake word with the small model,
+# so the device can show "listening" before the speaker has finished.
+EARLY_CHECKS_MS = (700, 1400)
+EARLY_MODEL = "base"
+UTTERANCE_SECONDS = 12.0
 
 # Spellings Whisper produces for "Jarvis" in German and English speech.
 WAKE = re.compile(
@@ -65,9 +70,22 @@ class Segmenter:
             max_utterance_ms=12000,
         )
         self._noise: float | None = None
+        self.count = 0
         self.reset()
 
+    @property
+    def speaking(self) -> bool:
+        return self._endpointer.speech_started
+
+    @property
+    def speech_ms(self) -> int:
+        return len(self._audio) // 32
+
+    def audio(self) -> bytes:
+        return bytes(self._audio)
+
     def reset(self) -> None:
+        self.count += 1
         self._endpointer = Endpointer(self.config)
         self._endpointer._noise = self._noise
         self._pre: deque[bytes] = deque(maxlen=PREROLL_FRAMES)
@@ -111,6 +129,9 @@ class LiveSession:
         self.segmenter = Segmenter(int(house.settings.get("mic.noise_filter")))
         self.queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._played = asyncio.Event()
+        self._early: asyncio.Task | None = None
+        self._early_segment = 0
+        self._early_step = 0
 
     # ----------------------------------------------------------- browser
     def _resolve_area(self, area_id: str | None) -> Area:
@@ -137,6 +158,39 @@ class LiveSession:
             while self.queue.qsize() >= MAX_BACKLOG:
                 self.queue.get_nowait()
             self.queue.put_nowait(segment)
+        self._maybe_early()
+
+    def _maybe_early(self) -> None:
+        seg = self.segmenter
+        if self.phase != "idle" or not seg.speaking or self._early is not None:
+            return
+        if self._early_segment != seg.count:
+            self._early_segment = seg.count
+            self._early_step = 0
+        if self._early_step < len(EARLY_CHECKS_MS) and seg.speech_ms >= EARLY_CHECKS_MS[self._early_step]:
+            self._early_step += 1
+            self._early = asyncio.create_task(self._early_wake(seg.audio(), seg.count))
+
+    async def _early_wake(self, pcm: bytes, segment: int) -> None:
+        house = self.house
+        language = house.settings.get("stt.language")
+        try:
+            transcript = await asyncio.to_thread(
+                house.stt.transcribe,
+                high_pass(pcm, int(house.settings.get("mic.noise_filter"))),
+                model=EARLY_MODEL,
+                language=language if language in ("de", "en") else "de",
+                prompt="Jarvis",
+            )
+        except Exception:  # noqa: BLE001
+            log.debug("early wake check failed", exc_info=True)
+            return
+        finally:
+            self._early = None
+        if segment != self.segmenter.count or self.phase != "idle":
+            return
+        if split_wake(transcript.text)[0]:
+            await self._state("listening", time.monotonic() + UTTERANCE_SECONDS + LISTEN_SECONDS)
 
     async def _render(self, text: str, lang: str) -> tuple[str | None, float]:
         """Piper audio as base64 WAV for the browser; the Audioserver stays out of Live answers."""
@@ -182,6 +236,8 @@ class LiveSession:
 
     async def _segment(self, pcm: bytes) -> None:
         house = self.house
+        if self.phase == "listening":
+            self.until = min(self.until, time.monotonic() + LISTEN_SECONDS)
         transcript = await asyncio.to_thread(
             house.stt.transcribe,
             high_pass(pcm, int(house.settings.get("mic.noise_filter"))),

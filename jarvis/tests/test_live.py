@@ -151,12 +151,71 @@ def test_microphone_allowed_for_own_origin(client):
     assert "microphone=(self)" in client.get("/").headers["permissions-policy"]
 
 
-def test_self_signed_certificate_is_created_once(tmp_path):
-    from jarvis.tls import ensure_certificate
+def test_certificate_is_signed_by_own_ca_and_learns_addresses(tmp_path):
+    from cryptography import x509
 
-    cert, key = ensure_certificate(tmp_path)
-    assert cert.read_bytes().startswith(b"-----BEGIN CERTIFICATE")
+    from jarvis.tls import Certificates, normalize_host
+
+    certs = Certificates(tmp_path)
+    assert certs.observe("192.168.1.50:8500") is False, "nothing happens before HTTPS is set up"
+    cert, key = certs.ensure()
     assert oct(key.stat().st_mode & 0o777) == "0o600"
-    first = cert.read_bytes()
-    ensure_certificate(tmp_path)
-    assert cert.read_bytes() == first
+    ca = x509.load_pem_x509_certificate(certs.ca_cert.read_bytes())
+    assert ca.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
+    leaf = x509.load_pem_x509_certificate(cert.read_bytes())
+    assert leaf.issuer == ca.subject
+    leaf.verify_directly_issued_by(ca)
+    reloaded = []
+    certs.on_change(lambda: reloaded.append(True))
+    assert certs.observe("192.168.1.50:8500") is True
+    assert certs.observe("192.168.1.50:8501") is False
+    leaf = x509.load_pem_x509_certificate(cert.read_bytes())
+    ips = {str(ip) for ip in leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.IPAddress)}
+    assert "192.168.1.50" in ips and reloaded == [True]
+    again = Certificates(tmp_path)
+    again.ensure()
+    assert again.ca_cert.read_bytes() == certs.ca_cert.read_bytes(), "the CA stays, so installed devices keep trusting it"
+    assert normalize_host("[fe80::1]:8501") == "fe80::1"
+    assert normalize_host("jarvis.local:8501") == "jarvis.local"
+    assert normalize_host("bad host!") is None
+
+
+def test_pwa_files_and_ca_download(client, house):
+    manifest = client.get("/manifest.webmanifest")
+    assert manifest.headers["content-type"].startswith("application/manifest+json")
+    data = manifest.json()
+    assert data["name"] == "Jarvis" and data["start_url"] == "/#live" and data["display"] == "fullscreen"
+    assert {i["sizes"] for i in data["icons"]} >= {"192x192", "512x512"}
+    for icon in data["icons"]:
+        assert client.get(icon["src"]).status_code == 200
+    assert client.get("/sw.js").headers["content-type"].startswith("text/javascript")
+    assert client.get("/jarvis-ca.crt").status_code == 404
+    house.certs.ensure()
+    ca = client.get("/jarvis-ca.crt")
+    assert ca.status_code == 200 and ca.content.startswith(b"-----BEGIN CERTIFICATE")
+    assert ca.headers["content-type"] == "application/x-x509-ca-cert"
+
+
+def test_wake_word_is_noticed_while_still_speaking(house):
+    models = []
+
+    def transcribe(pcm, **kw):
+        models.append(kw["model"])
+        return Transcript("Jarvis mach", "de", -0.2, 0.01)
+
+    house.stt.transcribe = transcribe
+    session, sent = _session(house)
+    speech = _tone(0.9, 8000)
+
+    async def scenario():
+        session.feed(_tone(0.6, 20))
+        for i in range(0, len(speech), 3200):
+            session.feed(speech[i : i + 3200])
+        await asyncio.sleep(0.05)
+        while session._early is not None:
+            await asyncio.sleep(0.01)
+
+    run(scenario())
+    assert models[0] == "base"
+    assert {"type": "state", "phase": "listening"} in sent
+    assert session.queue.empty(), "the sentence is still running"
