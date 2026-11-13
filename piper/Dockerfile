@@ -13,7 +13,8 @@ RUN pip install "piper-tts==1.8.0"
 
 # Voices are baked into the image so the container never downloads at runtime.
 # Format: <lang>/<lang_CC>/<name>/<quality>. Extend in Coolify as build argument.
-ARG PIPER_VOICES="de/de_DE/thorsten/high de/de_DE/thorsten/medium de/de_DE/kerstin/low de/de_DE/ramona/low de/de_DE/karlsson/low en/en_GB/alan/medium en/en_GB/northern_english_male/medium en/en_GB/southern_english_female/low en/en_GB/jenny_dioco/medium en/en_GB/cori/high"
+# Multi-speaker models (thorsten_emotional, mls, semaine, vctk, aru) show up once per speaker.
+ARG PIPER_VOICES="de/de_DE/thorsten/high de/de_DE/thorsten/medium de/de_DE/thorsten_emotional/medium de/de_DE/kerstin/low de/de_DE/ramona/low de/de_DE/karlsson/low de/de_DE/pavoque/low de/de_DE/eva_k/x_low de/de_DE/mls/medium en/en_GB/alan/medium en/en_GB/northern_english_male/medium en/en_GB/southern_english_female/low en/en_GB/jenny_dioco/medium en/en_GB/cori/high en/en_GB/semaine/medium en/en_GB/alba/medium en/en_GB/vctk/medium en/en_GB/aru/medium en/en_US/ryan/high en/en_US/lessac/high en/en_US/joe/medium en/en_US/john/medium en/en_US/norman/medium en/en_US/hfc_male/medium en/en_US/bryce/medium"
 RUN mkdir -p /voices \
  && for spec in $PIPER_VOICES; do \
       lang_cc=$(echo "$spec" | cut -d/ -f2); name=$(echo "$spec" | cut -d/ -f3); quality=$(echo "$spec" | cut -d/ -f4); \

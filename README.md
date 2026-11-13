@@ -7,6 +7,8 @@ Sprachassistent mit Jarvis-Persönlichkeit für ein Loxone-Haus. Wakeword-Mikrof
 - **Denken:** Gemini (Standard `gemini-3.8-flash`, im Drop-down wählbar) mit den freigegebenen Bausteinen. Google-Suche nur bei offenen Fragen.
 - **Handeln:** Miniserver über die Websocket-Schnittstelle, nur freigegebene Bausteine. Alarm, Schloss und Garage erst nach gesprochenem „Ja“. „Spiel Jazz im Wohnzimmer“ sucht am Audioserver eine Spotify-Playlist und startet sie in der Zone. Spotify muss dort angemeldet sein.
 - **Sprechen:** Piper lokal, als Durchsage über den Audioserver. Musik läuft danach weiter.
+- **Tempo:** Einfache Lichtbefehle („Licht im Esszimmer an“) schaltet Jarvis sofort ohne Gemini. Bei allen anderen Aktionen liefert Gemini die Bestätigung im selben Aufruf mit, eine zweite Runde gibt es nur bei Fehlern, Rückfragen oder Informationen.
+- **Stimmen:** 25 Piper-Modelle, davon mehrere mit verschiedenen Sprechern (Thorsten emotional, MLS, Semaine, VCTK, Aru). Auswahl und Probehören auf der KI-Seite.
 - **Live:** Menüpunkt „Live“ auf Tablet oder Handy. Nur Hintergrund und Uhr, Jarvis hört über das Mikrofon des Geräts auf „Jarvis“ und antwortet über dessen Lautsprecher, nicht über den Audioserver. Das Mikrofon ist nur offen, solange Live geöffnet ist. Tippen blendet das Menü ein.
 
 ## Aufbau

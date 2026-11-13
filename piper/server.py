@@ -2,6 +2,8 @@
 
 GET  /voices      -> list of installed voices
 POST /synthesize  -> {"text", "voice", "length_scale"} returns audio/wav
+
+Multi-speaker models appear once per speaker as "<model>#<speaker>".
 """
 
 from __future__ import annotations
@@ -21,7 +23,9 @@ from piper import PiperVoice, SynthesisConfig
 VOICES_DIR = Path(os.environ.get("PIPER_VOICES", "/voices"))
 PORT = int(os.environ.get("PIPER_PORT", "5000"))
 MAX_TEXT = 1500
-VOICE_ID = re.compile(r"^[a-z]{2}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)$")
+VOICE_ID = re.compile(r"^([a-z]{2}_[A-Z]{2}-[A-Za-z0-9_]+-(?:x_low|low|medium|high))(?:#([A-Za-z0-9_]+))?$")
+MAX_SPEAKERS = 12
+SKIP_SPEAKERS = {"angry", "disgusted", "drunk"}
 
 log = logging.getLogger("piper")
 _cache: dict[str, PiperVoice] = {}
@@ -41,22 +45,29 @@ def installed() -> list[dict]:
         voice_id = model.stem
         lang, _, rest = voice_id.partition("-")
         name, _, quality = rest.rpartition("-")
-        voices.append(
-            {
-                "id": voice_id,
-                "lang": lang.split("_")[0],
-                "locale": lang,
-                "name": name.replace("_", " ").title(),
-                "quality": quality,
-                "sample_rate": config.get("audio", {}).get("sample_rate", 22050),
-            }
-        )
+        base = {
+            "lang": lang.split("_")[0],
+            "locale": lang,
+            "quality": quality,
+            "sample_rate": config.get("audio", {}).get("sample_rate", 22050),
+        }
+        title = name.replace("_", " ").title()
+        speakers = [s for s in (config.get("speaker_id_map") or {}) if s not in SKIP_SPEAKERS][:MAX_SPEAKERS]
+        if len(speakers) > 1:
+            for speaker in speakers:
+                numbered = speaker.isdigit() or (speaker[:1] == "p" and speaker[1:].isdigit())
+                label = f"Sprecher {speaker}" if numbered else speaker.title()
+                voices.append({**base, "id": f"{voice_id}#{speaker}", "name": f"{title} · {label}"})
+        else:
+            voices.append({**base, "id": voice_id, "name": title})
     return voices
 
 
 def load(voice_id: str) -> PiperVoice:
-    if not VOICE_ID.match(voice_id):
+    match = VOICE_ID.match(voice_id)
+    if not match:
         raise KeyError(voice_id)
+    voice_id = match.group(1)
     with _lock:
         voice = _cache.get(voice_id)
         if voice is None:
@@ -68,11 +79,23 @@ def load(voice_id: str) -> PiperVoice:
         return voice
 
 
+def speaker_id(voice: PiperVoice, voice_id: str) -> int | None:
+    match = VOICE_ID.match(voice_id)
+    speaker = match.group(2) if match else None
+    if not speaker:
+        return None
+    mapping = getattr(voice.config, "speaker_id_map", None) or {}
+    if speaker not in mapping:
+        raise KeyError(voice_id)
+    return int(mapping[speaker])
+
+
 def synthesize(text: str, voice_id: str, length_scale: float) -> bytes:
     voice = load(voice_id)
+    config = SynthesisConfig(speaker_id=speaker_id(voice, voice_id), length_scale=length_scale)
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav:
-        voice.synthesize_wav(text, wav, syn_config=SynthesisConfig(length_scale=length_scale))
+        voice.synthesize_wav(text, wav, syn_config=config)
     return buffer.getvalue()
 
 

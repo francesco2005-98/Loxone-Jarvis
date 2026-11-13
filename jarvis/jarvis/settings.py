@@ -91,7 +91,7 @@ def _timezone(value: Any) -> str:
 HOST = r"[A-Za-z0-9.\-:\[\]]+"
 HOSTS = rf"{HOST}(?:[\s,;]+{HOST})*"
 MODEL = r"[a-z0-9][a-z0-9.\-]{2,80}"
-VOICE = r"[a-z]{2}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)"
+VOICE = r"[a-z]{2}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)(#[A-Za-z0-9_]+)?"
 
 FIELDS: dict[str, Field] = {
     "gemini.model": Field(DEFAULT_MODEL, _str(80, MODEL)),
