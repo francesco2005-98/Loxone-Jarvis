@@ -51,7 +51,7 @@ a { color: var(--gold); }
 ::selection { background: rgba(242, 194, 27, 0.32); }
 :focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
 
-#scene { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; z-index: 0; pointer-events: none; }
+#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; pointer-events: none; }
 .vignette { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden;
   background:
     radial-gradient(ellipse at 50% 42%, transparent 50%, rgba(0, 0, 0, 0.5) 100%),
@@ -344,14 +344,16 @@ body.live-mode .topbar {
   transition: transform 0.5s var(--ease), opacity 0.4s;
 }
 body.live-mode.live-menu .topbar { transform: none; opacity: 1; pointer-events: auto; }
-body.live-mode footer { opacity: 0; pointer-events: none; }
+body.live-mode { overflow: hidden; overscroll-behavior: none; }
+body.live-mode footer { display: none; }
 body.live-mode main { padding: 0; }
-.live-page { position: fixed; inset: 0; z-index: 3; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+body.live-mode.live-menu .topbar { padding-top: env(safe-area-inset-top); height: calc(76px + env(safe-area-inset-top)); }
+.live-page { position: fixed; inset: 0; z-index: 3; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .live-version {
-  position: absolute; left: clamp(20px, 3vw, 56px); bottom: clamp(18px, 3vh, 44px); pointer-events: none;
+  position: absolute; left: calc(clamp(16px, 3vw, 56px) + env(safe-area-inset-left)); bottom: calc(clamp(14px, 3vh, 44px) + env(safe-area-inset-bottom)); pointer-events: none;
   font-family: var(--mono); font-size: 0.86em; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim);
 }
-.live-clock { position: absolute; right: clamp(20px, 3vw, 56px); bottom: clamp(18px, 3vh, 44px); text-align: right; pointer-events: none; }
+.live-clock { position: absolute; right: calc(clamp(16px, 3vw, 56px) + env(safe-area-inset-right)); bottom: calc(clamp(14px, 3vh, 44px) + env(safe-area-inset-bottom)); text-align: right; pointer-events: none; }
 .live-clock .t { font-family: var(--mono); font-size: clamp(30px, 4.2vw, 84px); letter-spacing: 0.04em; color: var(--text); font-variant-numeric: tabular-nums; text-shadow: 0 0 26px rgba(242, 194, 27, 0.25); }
 .live-clock .d { font-family: var(--mono); font-size: clamp(12px, 0.95vw, 18px); letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); margin-top: 2px; }
 .live-notice {
@@ -362,7 +364,7 @@ body.live-mode main { padding: 0; }
 .live-notice.show { opacity: 1; pointer-events: auto; }
 .live-notice p { color: var(--text-2); margin: 10px 0 16px; }
 .live-panel {
-  position: absolute; left: clamp(20px, 3vw, 56px); bottom: calc(clamp(18px, 3vh, 44px) + 36px); width: min(320px, 70vw); display: flex; flex-direction: column; gap: 8px;
+  position: absolute; left: calc(clamp(16px, 3vw, 56px) + env(safe-area-inset-left)); bottom: calc(clamp(14px, 3vh, 44px) + env(safe-area-inset-bottom) + 36px); width: min(320px, 80vw); display: flex; flex-direction: column; gap: 8px;
   padding: 14px; border-radius: var(--radius); background: var(--panel-hi); border: 1px solid var(--line);
   opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity 0.4s, transform 0.4s var(--ease);
 }
