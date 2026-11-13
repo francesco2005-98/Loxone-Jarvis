@@ -3,6 +3,7 @@ import asyncio
 import pytest
 from google.genai import types
 
+from jarvis.brain.phrases import DEFAULT, fill
 from jarvis.brain.tools import Turn
 from jarvis.loxone.protocol import Reply
 from jarvis.loxone.structure import parse
@@ -129,7 +130,7 @@ def test_offline_light_uses_main_light(setup):
     house, area, dimmer, gate, sent = setup
     house.secrets.delete("gemini.api_key")
     reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Kannst du hier mal das Licht an machen", "de", None))
-    assert reply == "Licht an."
+    assert reply in [fill(t, anrede="Sir") for t in DEFAULT["de"]["light_on"]]
     assert sent == [(dimmer.uuid, "on")]
     reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Wer hat gestern gewonnen?", "de", None))
     assert "nicht erreichbar" in reply
@@ -202,12 +203,12 @@ def test_plain_light_command_switches_without_gemini(setup):
     house.brain._genai = lambda: (_ for _ in ()).throw(AssertionError("Gemini must not be asked"))
     session = AreaSession(area.id)
     reply, done = run(house.coordinator.handle_text(session, area, "Schalte das Licht im Wohnzimmer an.", "de", None))
-    assert reply == "Licht im Wohnzimmer ist an, Sir."
+    assert "Wohnzimmer" in reply and "Sir" in reply
     assert sent == [(dimmer.uuid, "on")]
     assert done and len(session.history) == 2
     house.settings.update({"house.default_anrede": ""})
     reply, _ = run(house.coordinator.handle_text(session, area, "Licht aus", "de", None))
-    assert reply == "Licht ist aus."
+    assert reply in [fill(t) for t in DEFAULT["de"]["light_off"]] and "Sir" not in reply
     assert sent[-1] == (dimmer.uuid, "off")
 
 
@@ -322,13 +323,13 @@ def test_blinds_dimming_and_time_without_gemini(setup):
     house.settings.update({"house.default_anrede": ""})
     session = AreaSession(area.id)
     reply, _ = run(house.coordinator.handle_text(session, area, "Fahr die Rollos im Wohnzimmer runter", "de", None))
-    assert reply == "Die Rollos im Wohnzimmer fahren runter."
+    assert reply in [fill(t, raum="im Wohnzimmer") for t in DEFAULT["de"]["shade_down"]]
     assert sent[-1][0] == shade.uuid
     reply, _ = run(house.coordinator.handle_text(session, area, "Dimm das Licht im Wohnzimmer auf 30 Prozent", "de", None))
-    assert reply == "Licht im Wohnzimmer auf 30 Prozent."
+    assert "30 Prozent" in reply and "Wohnzimmer" in reply
     assert sent[-1][0] == dimmer.uuid
     reply, _ = run(house.coordinator.handle_text(session, area, "Wie spät ist es?", "de", None))
-    assert reply.startswith("Es ist ") and "Uhr" in reply
+    assert "Uhr" in reply
 
 
 def test_old_lead_silence_follows_the_new_default(house):

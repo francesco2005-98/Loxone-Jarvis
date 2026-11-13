@@ -16,7 +16,7 @@ from ..brain.gemini import BrainUnavailable
 from ..brain.tools import Pending, Turn
 from ..people import ENROLL_SENTENCES
 from ..settings import ANREDE_LABELS
-from .arbitration import ARBITRATION_WINDOW, FOLLOWUP_SECONDS, AreaSession, Offer, Phase, rms
+from .arbitration import ARBITRATION_WINDOW, AreaSession, Offer, Phase, rms
 from .speaker import identify, profile_from
 from .vad import Endpointer, VadConfig, high_pass
 
@@ -119,12 +119,12 @@ class Coordinator:
             return None
         noise = int(self.house.settings.get("mic.noise_filter"))
         if offer == Offer.FOLLOWUP:
-            run = Run(mic, mic.area_id, "followup", Endpointer(VadConfig.for_noise_filter(noise, True)), state="listening")
+            run = Run(mic, mic.area_id, "followup", Endpointer(self._vad(noise, True)), state="listening")
             self.runs[mic.id] = run
             mics.send(mic, "RUN_START")
             mics.send(mic, "STT_START")
         else:
-            self.runs[mic.id] = Run(mic, mic.area_id, "command", Endpointer(VadConfig.for_noise_filter(noise)))
+            self.runs[mic.id] = Run(mic, mic.area_id, "command", Endpointer(self._vad(noise)))
             mics.send(mic, "RUN_START")
             if len(session.candidates) == 1:
                 area_id = mic.area_id
@@ -147,9 +147,13 @@ class Coordinator:
         elif run.kind != "enroll":
             self._speculate(run)
 
+    def _vad(self, noise: int, followup: bool = False) -> VadConfig:
+        end = int(self.house.settings.get("voice.end_silence_ms"))
+        return VadConfig.for_noise_filter(noise, followup, end_silence_ms=end)
+
     def _speculate(self, run: Run) -> None:
         ep = run.endpointer
-        if not ep.speech_started:
+        if not ep.speech_started or not self.house.settings.get("voice.speculative"):
             return
         if run.spec is not None and run.spec_anchor != ep.last_speech_ms:
             run.spec = None
@@ -293,11 +297,13 @@ class Coordinator:
                 await house.speech.say(reply, transcript.lang, [area])
                 self.last["timing"]["voice"] = house.speech.last_voice_ms
             if session.phase in (Phase.SPEAKING, Phase.THINKING):
-                session.open_followup(run.mic.id)
-                until = session.followup_until
+                seconds = float(house.settings.get("voice.followup_s"))
+                session.open_followup(run.mic.id, seconds)
                 self._phase(area.id)
-                asyncio.get_running_loop().call_later(FOLLOWUP_SECONDS + 0.5, self._expire, area.id, until)
-                await mics.listen(run.mic)
+                if session.phase == Phase.FOLLOWUP:
+                    until = session.followup_until
+                    asyncio.get_running_loop().call_later(seconds + 0.5, self._expire, area.id, until)
+                    await mics.listen(run.mic)
         except Exception:  # noqa: BLE001
             log.exception("voice processing failed")
             mics.send(run.mic, "RUN_END")
@@ -364,14 +370,15 @@ class Coordinator:
 
     async def _quick(self, turn: Turn) -> str | None:
         """Plain commands (light, dimming, blinds, time, date) are handled at once, without Gemini."""
+        if not self.house.settings.get("brain.quick"):
+            return None
         command = quick.parse(turn.text)
         if command is None:
             return None
-        anrede = self.house.people.address(turn.person_id)[0] if turn.person_id else None
-        if anrede is None:
-            anrede = ANREDE_LABELS.get(self.house.settings.get("house.default_anrede"))
+        anrede = self._anrede(turn)
+        book = self.house.phrases
         if command.kind in ("time", "date"):
-            return quick.clock_reply(command, datetime.now(self.house.settings.tz), turn.lang, anrede)
+            return quick.clock_reply(command, datetime.now(self.house.settings.tz), turn.lang, anrede, book)
         entries, room = quick.targets(self.house, turn.area, command)
         if not entries:
             return None
@@ -384,12 +391,16 @@ class Coordinator:
             except Exception:  # noqa: BLE001
                 log.exception("quick command failed")
                 ok = False
-        return quick.reply(command, room, turn.lang, anrede, ok)
+        return quick.reply(command, room, turn.lang, anrede, ok, book)
+
+    def _anrede(self, turn: Turn) -> str | None:
+        anrede = self.house.people.address(turn.person_id)[0] if turn.person_id else None
+        return anrede or ANREDE_LABELS.get(self.house.settings.get("house.default_anrede"))
 
     async def _fallback(self, turn: Turn) -> str:
         command = fallback.parse(turn.text)
         if command is None:
-            return fallback.offline_notice(turn.lang)
+            return self.house.phrases.pick("offline", turn.lang, anrede=self._anrede(turn))
         house = self.house
         runner = house.brain.runner
         targets = []
@@ -416,7 +427,10 @@ class Coordinator:
                 ok = ok and bool(result.get("ok"))
             except Exception:  # noqa: BLE001
                 ok = False
-        return fallback.reply(command, turn.lang, ok)
+        if not ok:
+            return self.house.phrases.pick("failed", turn.lang, anrede=self._anrede(turn))
+        intent = {"on": "light_on", "off": "light_off", "up": "shade_up", "down": "shade_down"}[command.action]
+        return self.house.phrases.pick(intent, turn.lang, anrede=self._anrede(turn))
 
     # --------------------------------------------------------- enrollment
     async def start_enroll(self, person_id: str, mic_id: str) -> None:

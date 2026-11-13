@@ -35,11 +35,12 @@ class VadConfig:
     max_utterance_ms: int = 12000
 
     @classmethod
-    def for_noise_filter(cls, level: int, followup: bool = False) -> "VadConfig":
+    def for_noise_filter(cls, level: int, followup: bool = False, end_silence_ms: int = 550) -> "VadConfig":
         level = max(0, min(4, level))
         return cls(
             margin_db=7.0 + 1.5 * level,
             floor_dbfs=-55.0 + 1.5 * level,
+            end_silence_ms=end_silence_ms,
             no_speech_timeout_ms=8000 if followup else 5000,
             max_utterance_ms=8000 if followup else 12000,
         )

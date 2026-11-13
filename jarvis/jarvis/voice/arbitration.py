@@ -144,13 +144,13 @@ class AreaSession:
     def start_speaking(self) -> None:
         self.phase = Phase.SPEAKING
 
-    def open_followup(self, mic_id: str | None) -> None:
-        if mic_id is None:
+    def open_followup(self, mic_id: str | None, seconds: float = FOLLOWUP_SECONDS) -> None:
+        if mic_id is None or seconds <= 0:
             self.reset()
             return
         self.phase = Phase.FOLLOWUP
         self.followup_mic = mic_id
-        self.followup_until = self.clock() + FOLLOWUP_SECONDS
+        self.followup_until = self.clock() + seconds
 
     def followup_expired(self) -> bool:
         return self.phase == Phase.FOLLOWUP and self.clock() > self.followup_until

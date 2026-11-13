@@ -318,6 +318,24 @@ def build_router(house: House) -> APIRouter:
         return {"voices": items}
 
 
+    @router.get("/phrases", dependencies=auth)
+    async def phrases() -> dict:
+        book = house.phrases
+        persona = house.settings.get("gemini.system_prompt")
+        return {
+            "examples": book.examples("de"),
+            "generated_at": book.generated_at,
+            "current": book.current_for(persona),
+        }
+
+    @router.post("/phrases/refresh", dependencies=auth)
+    async def phrases_refresh() -> dict:
+        if not house.secrets.has("gemini.api_key"):
+            raise HTTPException(400, "Erst einen Gemini-Schlüssel setzen")
+        if not await house.refresh_phrases(force=True):
+            raise HTTPException(502, house.brain.last_error or "Gemini hat keine brauchbaren Sätze geliefert")
+        return await phrases()
+
     @router.post("/tts/preview", dependencies=auth)
     async def preview(body: PreviewBody) -> Response:
         lang = "en" if body.lang == "en" else "de"

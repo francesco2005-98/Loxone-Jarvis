@@ -75,6 +75,10 @@ class Brain:
             )
         return self._session
 
+    async def close(self) -> None:
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+
     async def keep_warm(self) -> None:
         while True:
             if self.house.secrets.has("gemini.api_key"):
@@ -93,10 +97,22 @@ class Brain:
         from google.genai import types
 
         match = re.match(r"gemini-(\d+)", self.model)
-        if match and int(match.group(1)) >= 3:
-            level = types.ThinkingLevel.MINIMAL if "flash" in self.model else types.ThinkingLevel.LOW
-            return types.ThinkingConfig(thinking_level=level)
-        return None
+        if not match or int(match.group(1)) < 3:
+            return None
+        flash = "flash" in self.model
+        wanted = self.house.settings.get("brain.thinking")
+        if wanted == "auto":
+            wanted = "minimal" if flash else "low"
+        if not flash:
+            # Pro models know only low and high.
+            wanted = "high" if wanted == "high" else "low"
+        level = {
+            "minimal": types.ThinkingLevel.MINIMAL,
+            "low": types.ThinkingLevel.LOW,
+            "medium": types.ThinkingLevel.MEDIUM,
+            "high": types.ThinkingLevel.HIGH,
+        }[wanted]
+        return types.ThinkingConfig(thinking_level=level)
 
     def _config(self, system: str, declarations: list[dict] | None = None, search: bool = False):
         from google.genai import types

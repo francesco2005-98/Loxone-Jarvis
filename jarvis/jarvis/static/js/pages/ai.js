@@ -1,4 +1,4 @@
-import { busy, card, h, pageHead, pill, selectEl, toast } from "../dom.js";
+import { busy, card, clear, h, pageHead, pill, selectEl, timeAgo, toast, toggle } from "../dom.js";
 
 export default function ai(view, ctx) {
   const root = h("div", { class: "page" });
@@ -67,6 +67,96 @@ export default function ai(view, ctx) {
 
   root.append(h("div", { class: "grid ai-grid" }, gemini, voices));
 
+  // ------------------------------------------------------------ tuning
+  const slider = (min, max, step, fmt) => {
+    const input = h("input", { type: "range", min: String(min), max: String(max), step: String(step) });
+    const label = h("span", { class: "gold-text" }, "");
+    const update = () => (label.textContent = fmt(Number(input.value)));
+    input.addEventListener("input", update);
+    return { input, label, update, row: h("div", { class: "row" }, input, label) };
+  };
+  const endSilence = slider(300, 1500, 50, (v) => `${v} ms`);
+  const followup = slider(0, 20, 1, (v) => (v === 0 ? "aus" : `${v} s`));
+  const speculative = toggle(false, () => {});
+  const quickToggle = toggle(false, () => {});
+  const earlyWake = toggle(false, () => {});
+  const thinking = selectEl(
+    [
+      { value: "auto", label: "Automatisch (Flash minimal, Pro niedrig)" },
+      { value: "minimal", label: "Minimal · am schnellsten" },
+      { value: "low", label: "Niedrig" },
+      { value: "medium", label: "Mittel" },
+      { value: "high", label: "Hoch · am gründlichsten" },
+    ],
+    "auto",
+  );
+  const phraseList = h("div", { class: "stack" });
+  const phraseState = h("div", { class: "hint" }, "");
+  const phraseBtn = h("button", { class: "btn small", type: "button" }, "Neu formulieren");
+  const tuneSave = h("button", { class: "btn primary", type: "button" }, "Speichern");
+  const row = (label, control, hint) => [h("div", { class: "label" }, label), h("div", { class: "stack", style: { gap: "4px" } }, control, hint ? h("div", { class: "hint" }, hint) : null)];
+  const tuning = card(
+    "Feinabstimmung · Reaktion",
+    h(
+      "div",
+      { class: "kv" },
+      ...row("Satzende nach", endSilence.row, "So lange Stille gilt als Satzende. Kürzer antwortet schneller, länger lässt Zeit für kurze Denkpausen im Satz."),
+      ...row("Vorab-Erkennung", speculative, "Startet die Spracherkennung schon in der ersten kurzen Pause. Spart rund 0,3 s."),
+      ...row("Nachfrage-Fenster", followup.row, "So lange hört Jarvis nach einer Antwort ohne erneutes „Jarvis“ zu."),
+      ...row("Sofortantworten", quickToggle, "Licht, Dimmen, Rollos, Uhrzeit und Datum ohne Gemini, in Jarvis' Persönlichkeit."),
+      ...row("Nachdenken von Gemini", thinking, "Weniger Nachdenken antwortet schneller, mehr hilft bei komplexen Fragen."),
+      ...row("Live: früh hinhören", earlyWake, "Erkennt „Jarvis“ schon während du sprichst und zeigt sofort, dass er zuhört."),
+    ),
+    h("hr", { class: "sep" }),
+    h("div", { class: "row between" }, h("span", { class: "label" }, "So klingen Sofortantworten"), phraseBtn),
+    phraseList,
+    phraseState,
+    h("div", { class: "row", style: { "margin-top": "12px" } }, h("span", { class: "spacer" }), tuneSave),
+  );
+  root.append(h("div", { class: "grid", style: { "margin-top": "clamp(14px, 1.2vw, 24px)" } }, tuning));
+
+  function renderPhrases(res) {
+    clear(phraseList);
+    for (const text of res.examples) phraseList.append(h("div", { class: "notice" }, `„${text}“`));
+    phraseState.textContent = res.generated_at
+      ? `Von Gemini aus der Persönlichkeit formuliert, ${timeAgo(res.generated_at)}${res.current ? "" : " · Persönlichkeit seitdem geändert, wird neu formuliert"}.`
+      : "Eingebaute Butler-Sätze. Mit Gemini-Schlüssel formuliert Jarvis sie aus deiner Persönlichkeit.";
+  }
+
+  phraseBtn.addEventListener("click", () =>
+    busy(phraseBtn, async () => {
+      try {
+        renderPhrases(await ctx.api("/phrases/refresh", { method: "POST" }));
+        toast("Sofortantworten neu formuliert");
+      } catch (e) {
+        toast(e.message, "bad");
+      }
+    }),
+  );
+
+  tuneSave.addEventListener("click", () =>
+    busy(tuneSave, async () => {
+      try {
+        await ctx.api("/settings", {
+          method: "PUT",
+          body: {
+            values: {
+              "voice.end_silence_ms": Number(endSilence.input.value),
+              "voice.followup_s": Number(followup.input.value),
+              "brain.thinking": thinking.value,
+              "voice.speculative": speculative.querySelector("input").checked,
+              "brain.quick": quickToggle.querySelector("input").checked,
+              "live.early_wake": earlyWake.querySelector("input").checked,
+            },
+          },
+        });
+        toast("Feinabstimmung gespeichert");
+      } catch (e) {
+        toast(e.message, "bad");
+      }
+    }),
+  );
+
   const audio = new Audio();
 
   async function preview(lang, select, button) {
@@ -107,6 +197,7 @@ export default function ai(view, ctx) {
       try {
         await ctx.api("/settings", { method: "PUT", body: { values: { "gemini.model": modelSelect.value, "gemini.system_prompt": prompt.value } } });
         toast("Gespeichert");
+        setTimeout(() => ctx.api("/phrases").then(renderPhrases).catch(() => {}), 8000);
       } catch (e) {
         toast(e.message, "bad");
       }
@@ -153,6 +244,15 @@ export default function ai(view, ctx) {
       const v = settings.values;
       keyState.textContent = settings.secrets["gemini.api_key"] ? "•••• •••• •••• ••••" : "Noch kein Schlüssel";
       prompt.value = v["gemini.system_prompt"];
+      endSilence.input.value = v["voice.end_silence_ms"];
+      endSilence.update();
+      followup.input.value = v["voice.followup_s"];
+      followup.update();
+      thinking.value = v["brain.thinking"];
+      speculative.querySelector("input").checked = v["voice.speculative"];
+      quickToggle.querySelector("input").checked = v["brain.quick"];
+      earlyWake.querySelector("input").checked = v["live.early_wake"];
+      ctx.api("/phrases").then(renderPhrases).catch(() => {});
       speed.value = v["voice.speed"];
       speedLabel.textContent = `${Number(v["voice.speed"]).toFixed(2)}×`;
       fill(modelSelect, [{ value: v["gemini.model"], label: v["gemini.model"] }], v["gemini.model"]);

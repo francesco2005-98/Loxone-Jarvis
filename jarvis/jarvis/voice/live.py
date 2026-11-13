@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 
 from ..areas import Area
 from ..audio import wav
-from .arbitration import FOLLOWUP_SECONDS, AreaSession
+from .arbitration import AreaSession
 from .vad import FRAME_BYTES, Endpointer, VadConfig, high_pass
 
 if TYPE_CHECKING:
@@ -167,6 +167,7 @@ class LiveSession:
     def feed(self, data: bytes) -> None:
         if self.phase in ("thinking", "speaking"):
             return
+        self.segmenter.config.end_silence_ms = int(self.house.settings.get("voice.end_silence_ms"))
         for item in self.segmenter.feed(data):
             while self.queue.qsize() >= MAX_BACKLOG:
                 self.queue.get_nowait()
@@ -177,7 +178,7 @@ class LiveSession:
     def _speculate(self) -> None:
         """Start recognition on a short pause; the result is used if the pause ends the sentence."""
         seg = self.segmenter
-        if not seg.speaking:
+        if not seg.speaking or not self.house.settings.get("voice.speculative"):
             return
         if self._spec is not None and self._spec[0] != seg.key:
             self._spec = None
@@ -197,6 +198,8 @@ class LiveSession:
     def _maybe_early(self) -> None:
         seg = self.segmenter
         if self.phase != "idle" or not seg.speaking or self._early is not None:
+            return
+        if not self.house.settings.get("live.early_wake"):
             return
         if self._early_segment != seg.count:
             self._early_segment = seg.count
@@ -332,4 +335,9 @@ class LiveSession:
         self.segmenter.reset()
         while not self.queue.empty():
             self.queue.get_nowait()
-        await self._state("followup", time.monotonic() + FOLLOWUP_SECONDS)
+        seconds = float(self.house.settings.get("voice.followup_s"))
+        if seconds > 0:
+            await self._state("followup", time.monotonic() + seconds)
+        else:
+            self.session.reset()
+            await self._state("idle")

@@ -17,6 +17,7 @@ from ..loxone.catalog import ACTIONS
 
 if TYPE_CHECKING:
     from ..areas import Area
+    from .phrases import PhraseBook
     from ..house import House
     from ..loxone.catalog import Entry
 
@@ -129,34 +130,33 @@ def targets(house: "House", area: "Area", command: QuickCommand) -> tuple[list["
     return chosen, room_label
 
 
-def clock_reply(command: QuickCommand, now: datetime, lang: str, anrede: str | None) -> str:
-    tail = f", {anrede}." if anrede else "."
-    if lang == "en":
-        if command.kind == "time":
-            return f"It's {now:%H:%M}{tail}"
-        return f"Today is {now:%A, %B} {now.day}{tail}"
-    if command.kind == "time":
-        return f"Es ist {now.hour} Uhr {now.minute:02d}{tail}" if now.minute else f"Es ist {now.hour} Uhr{tail}"
-    return f"Heute ist {WEEKDAYS[now.weekday()]}, der {now.day}. {MONTHS[now.month - 1]}{tail}"
+def _anrede_and_place(command: QuickCommand, room_label: str | None, lang: str) -> str:
+    if not room_label:
+        return ""
+    return f"in the {room_label}" if lang == "en" else f"{command.prep or 'im'} {room_label}"
 
 
-def reply(command: QuickCommand, room_label: str | None, lang: str, anrede: str | None, ok: bool) -> str:
-    tail = f", {anrede}." if anrede else "."
+def clock_reply(command: QuickCommand, now: datetime, lang: str, anrede: str | None, book: "PhraseBook") -> str:
     if lang == "en":
-        if not ok:
-            return "That didn't work."
-        where = f" in the {room_label}" if room_label else ""
-        if command.kind == "shade":
-            return f"Blinds{where} going {'up' if command.action == 'up' else 'down'}{tail}"
-        if command.kind == "dim":
-            return f"Lights{where} at {command.value} percent{tail}"
-        return f"Lights{where} {'on' if command.action == 'on' else 'off'}{tail}"
+        uhrzeit = f"{now:%H:%M}"
+        datum = f"{now:%A, %B} {now.day}"
+    else:
+        uhrzeit = f"{now.hour} Uhr {now.minute:02d}" if now.minute else f"{now.hour} Uhr"
+        datum = f"{WEEKDAYS[now.weekday()]}, der {now.day}. {MONTHS[now.month - 1]}"
+    return book.pick(command.kind, lang, anrede=anrede, uhrzeit=uhrzeit, datum=datum)
+
+
+INTENT = {
+    ("light", "on"): "light_on",
+    ("light", "off"): "light_off",
+    ("dim", "dim"): "dim",
+    ("shade", "up"): "shade_up",
+    ("shade", "down"): "shade_down",
+}
+
+
+def reply(command: QuickCommand, room_label: str | None, lang: str, anrede: str | None, ok: bool, book: "PhraseBook") -> str:
     if not ok:
-        return "Das hat nicht geklappt."
-    where = f" {command.prep or 'im'} {room_label}" if room_label else ""
-    if command.kind == "shade":
-        return f"Die Rollos{where} fahren {'hoch' if command.action == 'up' else 'runter'}{tail}"
-    if command.kind == "dim":
-        return f"Licht{where} auf {command.value} Prozent{tail}"
-    state = "an" if command.action == "on" else "aus"
-    return f"Licht{where} ist {state}{tail}"
+        return book.pick("failed", lang, anrede=anrede)
+    intent = INTENT[(command.kind, command.action)]
+    return book.pick(intent, lang, raum=_anrede_and_place(command, room_label, lang), anrede=anrede, wert=command.value or "")

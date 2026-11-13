@@ -28,6 +28,7 @@ from .security import Auth
 from .settings import Settings
 from .timers import TimerService
 from .tls import Certificates
+from .brain.phrases import PhraseBook
 from .usage import Usage
 from .voice.coordinator import Coordinator
 from .voice.mics import MicManager
@@ -69,6 +70,7 @@ class House:
         self._favorites: dict[int, tuple[float, list[dict]]] = {}
         self.live_sessions: set = set()
         self.certs = Certificates(config.data_dir / "tls")
+        self.phrases = PhraseBook(config.data_dir / "phrases.json")
         self.started_at = time.time()
         self.settings.on_change(self._settings_changed)
 
@@ -84,6 +86,7 @@ class House:
         self.background(asyncio.to_thread(self.stt.preload, self.settings.get("stt.model")), "stt-preload")
         self.background(self._warm_voices(), "voice-warmup")
         self.background(self.brain.keep_warm(), "gemini-warm")
+        self.background(self.refresh_phrases(), "phrases")
         self.background(asyncio.to_thread(self.stt.preload, "base"), "stt-preload-base")
 
     async def _warm_voices(self, attempts: int = 10) -> None:
@@ -103,9 +106,15 @@ class House:
         await self.timers.stop()
         await self.audioserver.stop()
         await self.miniserver.stop()
+        await self.brain.close()
         self.db.close()
 
-    def background(self, coro: Coroutine, name: str) -> asyncio.Task:
+    def background(self, coro: Coroutine, name: str) -> asyncio.Task | None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            coro.close()
+            return None
         task = asyncio.create_task(coro, name=name)
         self._tasks.add(task)
 
@@ -131,15 +140,32 @@ class House:
             self.audioserver.reconnect()
         if "mic.sensitivity" in keys:
             self.mics.apply_sensitivity()
+        if "gemini.system_prompt" in keys:
+            self.background(self.refresh_phrases(), "phrases")
         if keys & {"voice.de", "voice.en"}:
             self.background(self._warm_voices(attempts=1), "voice-warmup")
         if "stt.model" in keys:
             self.background(asyncio.to_thread(self.stt.preload, self.settings.get("stt.model")), "stt-preload")
 
+    async def refresh_phrases(self, force: bool = False) -> bool:
+        """Let Gemini word the instant answers in the current personality; keeps the old book on failure."""
+        persona = self.settings.get("gemini.system_prompt")
+        if not self.secrets.has("gemini.api_key") or (not force and self.phrases.current_for(persona)):
+            return False
+        try:
+            await self.phrases.generate(self.brain, persona)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("instant phrases not refreshed: %s", exc)
+            return False
+        self.events.log("ai", "Sofortantworten neu formuliert", "aus der aktuellen Persönlichkeit")
+        return True
+
     def secret_changed(self, key: str) -> None:
         if key == "loxone.password":
             self.miniserver.forget_token()
             self.miniserver.reconnect()
+        if key == "gemini.api_key":
+            self.background(self.refresh_phrases(), "phrases")
 
     # --------------------------------------------------------------- audio
     def zone_of(self, area: Area) -> LoxControl | None:
