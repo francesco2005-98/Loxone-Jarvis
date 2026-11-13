@@ -31,7 +31,7 @@ _VERB = r"(?:(?:schalte|schalt|mach|mache)(?: mal)? )?(?:bitte )?"
 _MOVE = r"(?:(?:fahr|fahre|mach|mache)(?: mal)? )?(?:bitte )?"
 _DIMV = r"(?:(?:dimm|dimme|mach|mache|stell|stelle|schalte)(?: mal)? )?(?:bitte )?"
 _STATE = r"(?P<state>an|ein|aus|anschalten|einschalten|ausschalten|anmachen|ausmachen)"
-_SHADE_STATE = r"(?P<state>hoch|rauf|auf|öffnen|runter|herunter|zu|schließen)(?: fahren)?"
+_SHADE_STATE = r"(?P<state>hoch|rauf|ganz auf|ganz zu|auf|öffnen|runter|herunter|zu|schließen)(?: fahren)?"
 _VALUE = r"(?P<value>\d{1,3}) ?(?:prozent|%)?"
 _END = r"(?: bitte)?"
 _DEVICE = r"(?P<device>(?:das |die |den |der )?[a-zäöüß][a-zäöüß0-9\- ]{2,60}?)"
@@ -74,7 +74,7 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
 
 _WAKE = re.compile(r"^(?:(?:hey|hallo|ok|okay) )?(?:jarvis|dschawis|javis)\b ?")
 _ON = {"an", "ein", "anschalten", "einschalten", "anmachen", "on"}
-_UP = {"hoch", "rauf", "auf", "öffnen"}
+_UP = {"hoch", "rauf", "auf", "ganz auf", "öffnen"}
 _DEVICE_KINDS = {"light": "light", "dim": "light", "shade": "shading", "kind": "light", "named": "light", "mood": "light"}
 _STOP = {"das", "die", "den", "der", "dem", "im", "in", "am", "an", "beim", "bei", "über", "neben", "hinter", "mal", "bitte"}
 _WEAK = {"licht", "lichter", "beleuchtung", "lampe", "lampen", "leuchte"}
@@ -128,6 +128,7 @@ def parse(text: str) -> QuickCommand | None:
                 return None
             return QuickCommand("dim", room, groups.get("prep"), "dim", value)
         if kind == "shade":
+            room = re.sub(r"\s+ganz$", "", room) if room else None
             return QuickCommand("up" if groups["state"] in _UP else "down", room, groups.get("prep"), "shade")
         if kind == "mood":
             return QuickCommand("scene", room, groups.get("prep"), "mood", scene=groups["mood"].strip())

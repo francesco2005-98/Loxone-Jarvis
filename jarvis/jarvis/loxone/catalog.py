@@ -461,6 +461,14 @@ class Catalog:
             if t == "WindowMonitor":
                 counts = [(get("numOpen"), "offen"), (get("numTilted"), "gekippt"), (get("numClosed"), "zu")]
                 return ", ".join(f"{int(n)} {label}" for n, label in counts if n is not None)
+            if t == "LightsceneRGB":
+                active = get("activeScene")
+                if active in (None, "", "0", 0):
+                    return "aus"
+                scenes = self._details(entry).get("sceneList") or {}
+                return "Szene " + str(scenes.get(str(active), active))
+            if t == "CentralJalousie":
+                return ""
             if t == "Gate":
                 pos = get("position")
                 if pos is None:

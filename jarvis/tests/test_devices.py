@@ -151,3 +151,40 @@ def test_offer_accepts_natural_action_words(home):
     turn = Turn(area=area, lang="de", text="")
     offer = house.brain.runner.offer({"question": "Rollos zu?", "actions": [{"device": e["Rollo Süd"].short_id, "action": "close"}]}, turn)
     assert offer is not None and offer.actions[0][1] == "down"
+
+
+def test_blinds_up_and_down_are_not_confused():
+    from jarvis.brain import quick
+
+    assert quick.parse("Fahr die Rollos im Wohnzimmer auf").action == "up"
+    assert quick.parse("Fahr die Rollos im Wohnzimmer ganz auf").action == "up"
+    assert quick.parse("Fahr die Rollos im Wohnzimmer ganz auf").room == "wohnzimmer"
+    assert quick.parse("Mach die Rollos im Wohnzimmer zu").action == "down"
+    assert quick.parse("Fahr die Rollos im Wohnzimmer ganz zu").room == "wohnzimmer"
+
+
+def test_rgb_scene_state_is_shown(home):
+    house, _, e = home
+    rgb = next(iter(e.values()))
+    house.catalog.structure.controls["rgb"] = type(house.catalog.structure.controls["jal"])(
+        uuid="rgb", name="Farblicht", type="LightsceneRGB", room="Wohnzimmer", room_uuid="r-wohn",
+        category=None, cat_type=None, parent=None, states={"activeScene": "s-rgb"}, details={"sceneList": {"1": "Abend"}},
+    )
+    house.catalog.sync(house.catalog.structure)
+    house.miniserver.values["s-rgb"] = 1
+    entry = next(x for x in house.catalog.entries() if x.name == "Farblicht")
+    assert house.catalog.describe_state(entry, house.miniserver.state) == "Szene Abend"
+
+
+def test_a_critical_question_survives_an_unclear_answer(home):
+    house, area, e = home
+    from jarvis.brain.tools import Pending
+    from jarvis.voice.arbitration import AreaSession
+
+    session = AreaSession(area.id)
+    gate = e["Hoftor"]
+    session.pending = Pending("control", "Tor öffnen?", [(gate, "open", None, None)])
+    reply, _ = run(house.coordinator.handle_text(session, area, "Wie meinst du das?", "de", None))
+    assert session.pending is not None and session.pending.kind == "control", "the question stays open"
+    run(house.coordinator.handle_text(session, area, "Ja", "de", None))
+    assert session.pending is None, "the yes was taken and the question is closed"

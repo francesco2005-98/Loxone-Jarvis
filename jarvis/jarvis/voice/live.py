@@ -181,6 +181,7 @@ class LiveSession:
         if not seg.speaking or not self.house.settings.get("voice.speculative"):
             return
         if self._spec is not None and self._spec[0] != seg.key:
+            self._spec[1].cancel()
             self._spec = None
         if self._spec is None and seg.silence_ms >= SPECULATE_MS:
             self._spec = (seg.key, asyncio.ensure_future(self._transcribe(seg.audio())))

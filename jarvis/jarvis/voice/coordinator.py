@@ -164,6 +164,7 @@ class Coordinator:
         if not ep.speech_started or not self.house.settings.get("voice.speculative"):
             return
         if run.spec is not None and run.spec_anchor != ep.last_speech_ms:
+            run.spec.cancel()
             run.spec = None
         if run.spec is None and ep.silence_ms >= SPECULATE_MS:
             run.spec_anchor = ep.last_speech_ms
@@ -350,6 +351,8 @@ class Coordinator:
                 return await self._confirmed(pending, session, area, lang, person_id, origin)
             elif answer == confirm.Answer.NO:
                 return ("Abgebrochen." if lang == "de" else "Cancelled."), []
+            else:
+                session.pending = pending
         session.suggestion = None
         turn = Turn(area=area, lang=lang, text=text, person_id=person_id, origin=origin)
         instant = await self._quick(turn)
