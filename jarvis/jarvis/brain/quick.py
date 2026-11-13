@@ -52,6 +52,8 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     ("light", re.compile(r"^(?:please )?turn (?:the )?lights?(?: in (?:the )?(?P<room>[a-z][a-z\- ]{1,40}?))? (?P<state>on|off)(?: please)?$")),
     ("named", re.compile(rf"^{_VERB}{_DEVICE}(?: {_PREP} {_ROOM})?{_SPOT} (?:bitte )?{_STATE}{_END}$")),
     ("named", re.compile(rf"^{_VERB}{_PREP} {_ROOM} {_DEVICE}{_SPOT} {_STATE}{_END}$")),
+    ("temp", re.compile(rf"^(?:wie warm|wie kalt|welche temperatur|wie viel grad|wieviel grad)(?: ist es| hat es| haben wir| herrscht)?(?: {_PREP} {_ROOM}| (?P<outside>draußen|draussen|außen|aussen|im freien))?{_END}$")),
+    ("temp", re.compile(rf"^(?:temperatur)(?: {_PREP} {_ROOM}| (?P<outside>draußen|draussen|außen|aussen))?{_END}$")),
     ("time", re.compile(r"^(?:wie spät ist es|wie viel uhr ist es|wieviel uhr ist es|wie spät haben wir|was ist die uhrzeit|uhrzeit)(?: bitte)?$")),
     ("time", re.compile(r"^(?:what time is it|what's the time|what is the time)(?: please)?$")),
     ("date", re.compile(r"^(?:welcher tag ist heute|welches datum (?:haben wir|ist heute)|der wievielte ist heute|was ist heute für ein tag)$")),
@@ -96,6 +98,8 @@ def parse(text: str) -> QuickCommand | None:
         room = (groups.get("room") or "").strip() or None
         if kind in ("time", "date"):
             return QuickCommand(kind, None, None, kind)
+        if kind == "temp":
+            return QuickCommand("temp", room, groups.get("prep"), "temp", device="outside" if groups.get("outside") else None)
         if kind == "dim":
             value = int(groups["value"])
             if value > 100:
@@ -267,6 +271,43 @@ def _anrede_and_place(command: QuickCommand, room_label: str | None, lang: str) 
     if not room_label:
         return ""
     return f"in the {room_label}" if lang == "en" else f"{command.prep or 'im'} {room_label}"
+
+
+_OUTSIDE = re.compile(r"au(ß|ss)en|outdoor|outside|garten|terrasse|wetter", re.I)
+_TEMP_WORDS = re.compile(r"temp", re.I)
+
+
+def temperature_reply(house: "House", area: "Area", command: QuickCommand, lang: str, anrede: str | None, book: "PhraseBook") -> str | None:
+    """Room temperature from the room controller, outside temperature from a sensor. None lets Gemini answer."""
+    state = house.miniserver.state
+    entries = house.catalog.entries(only_allowed=False)
+    value = None
+    label = None
+    if command.device == "outside":
+        for e in entries:
+            if e.type == "InfoOnlyAnalog" and _OUTSIDE.search(e.name) and _TEMP_WORDS.search(e.name):
+                value = state(e.uuid, "value")
+                label = "draußen" if lang != "en" else "outside"
+                break
+    else:
+        controllers = [e for e in entries if e.type == "IRoomControllerV2"]
+        sensors = [e for e in entries if e.type == "InfoOnlyAnalog" and _TEMP_WORDS.search(e.name) and not _OUTSIDE.search(e.name)]
+        if command.room is not None:
+            key = _room_key(command.room)
+            pick = lambda pool: [e for e in pool if e.room and _room_key(e.room) == key]  # noqa: E731
+            found = pick(controllers) or pick(sensors)
+        else:
+            found = [e for e in controllers if e.room in area.rooms] or [e for e in sensors if e.room in area.rooms]
+        if len(found) == 1:
+            e = found[0]
+            value = state(e.uuid, "tempActual" if e.type == "IRoomControllerV2" else "value")
+            label = _anrede_and_place(command, e.room, lang) if command.room else ""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    wert = f"{number:.1f}".replace(".", ",") + " Grad" if lang != "en" else f"{number:.1f} degrees"
+    return book.pick("temperature", lang, raum=label or "", anrede=anrede, wert=wert)
 
 
 def clock_reply(command: QuickCommand, now: datetime, lang: str, anrede: str | None, book: "PhraseBook") -> str:

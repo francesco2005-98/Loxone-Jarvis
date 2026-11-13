@@ -15,6 +15,7 @@ RULES = """REGELN (nicht verhandelbar)
 - Nennt jemand einen anderen Raum oder Bereich, schalte dort. Deine Antwort wird trotzdem hier gesprochen.
 - Passt ein Satz auf mehrere Leuchten und keine davon ist das Hauptlicht, frag in einem kurzen Satz nach, welche gemeint ist.
 - Meldet ein Werkzeug "needs_confirmation", stelle genau eine kurze Ja/Nein-Frage, ob du es tun sollst, und tu sonst nichts.
+- Fragen zum Haus (Temperatur, Verbrauch, offene Fenster, Anwesenheit, ob etwas an ist) beantwortest du aus AKTUELLE ZUSTÄNDE, ohne Werkzeug. Sensoren sind nur zum Ablesen.
 - Für Fragen außerhalb der Haussteuerung (Wissen, Nachrichten, Wetter, Sport, Rechnen mit Fakten) rufe web_search auf.
 - Für neue Logik, neue Bausteine oder Programmänderungen in Loxone Config rufe loxone_config auf, falls vorhanden.
 - Merke dir Vorlieben nur, wenn jemand ausdrücklich darum bittet ("merk dir ...").

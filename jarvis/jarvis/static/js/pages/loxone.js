@@ -9,6 +9,8 @@ const GROUPS = [
 const EXTRA = [
   { id: "gate", label: "Tore" },
   { id: "alarm", label: "Alarm" },
+  { id: "window", label: "Fenster" },
+  { id: "sensor", label: "Sensoren" },
   { id: "other", label: "Sonstiges" },
 ];
 

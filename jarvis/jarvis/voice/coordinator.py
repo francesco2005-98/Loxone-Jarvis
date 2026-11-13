@@ -469,6 +469,8 @@ class Coordinator:
         book = self.house.phrases
         if command.kind in ("time", "date"):
             return quick.clock_reply(command, datetime.now(self.house.settings.tz), turn.lang, anrede, book)
+        if command.kind == "temp":
+            return quick.temperature_reply(self.house, turn.area, command, turn.lang, anrede, book)
         entries, room = quick.targets(self.house, turn.area, command)
         if not entries:
             return None

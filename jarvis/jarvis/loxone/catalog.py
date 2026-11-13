@@ -24,7 +24,13 @@ CLIMATE_TYPES = {"IRoomControllerV2"}
 GATE_TYPES = {"Gate", "CentralGate"}
 ALARM_TYPES = {"Alarm"}
 OTHER_TYPES = {"Radio", "Slider", "ValueSelector", "UpDownAnalog", "UpDownDigital"}
-SUPPORTED = LIGHT_TYPES | SWITCH_TYPES | SHADING_TYPES | CLIMATE_TYPES | GATE_TYPES | ALARM_TYPES | OTHER_TYPES
+WINDOW_TYPES = {"Window"}
+# Read-only blocks: Jarvis can answer questions about them but never switches anything.
+SENSOR_TYPES = {"InfoOnlyAnalog", "InfoOnlyDigital", "InfoOnlyText", "TextState", "Meter", "PresenceDetector", "WindowMonitor"}
+SUPPORTED = (
+    LIGHT_TYPES | SWITCH_TYPES | SHADING_TYPES | CLIMATE_TYPES | GATE_TYPES | ALARM_TYPES | OTHER_TYPES
+    | WINDOW_TYPES | SENSOR_TYPES
+)
 
 ACTIONS: dict[str, tuple[str, ...]] = {
     "Switch": ("on", "off"),
@@ -35,7 +41,7 @@ ACTIONS: dict[str, tuple[str, ...]] = {
     "LightControllerV2": ("on", "off", "dim", "scene"),
     "ColorPickerV2": ("on", "off", "dim", "color", "white"),
     "LightsceneRGB": ("on", "off", "scene"),
-    "Jalousie": ("up", "down", "stop", "shade", "position"),
+    "Jalousie": ("up", "down", "stop", "shade", "position", "slat"),
     "CentralJalousie": ("up", "down", "stop", "shade"),
     "Gate": ("open", "close", "stop"),
     "CentralGate": ("open", "close", "stop"),
@@ -46,17 +52,44 @@ ACTIONS: dict[str, tuple[str, ...]] = {
     "ValueSelector": ("set",),
     "UpDownAnalog": ("set",),
     "UpDownDigital": ("up", "down"),
+    "Window": ("open", "close", "stop", "position"),
+    **{t: () for t in SENSOR_TYPES},
+}
+
+# Words Gemini (or a person) may use for an action, per block family. Mapped before validation.
+_COMMON_ALIASES = {
+    "an": "on", "ein": "on", "einschalten": "on", "anschalten": "on", "turn_on": "on", "switch_on": "on", "activate": "on",
+    "aus": "off", "ausschalten": "off", "turn_off": "off", "switch_off": "off", "deactivate": "off",
+    "halt": "stop", "anhalten": "stop", "stopp": "stop",
+}
+_TYPE_ALIASES: dict[str, dict[str, str]] = {
+    "shading": {
+        "open": "up", "raise": "up", "hoch": "up", "rauf": "up", "auf": "up", "fullup": "up", "öffnen": "up",
+        "close": "down", "lower": "down", "runter": "down", "zu": "down", "fulldown": "down", "schließen": "down",
+        "set": "position", "move": "position", "lamelle": "slat", "lamellen": "slat", "tilt": "slat", "beschatten": "shade",
+    },
+    "window": {"auf": "open", "öffnen": "open", "up": "open", "zu": "close", "schließen": "close", "down": "close", "set": "position", "move": "position"},
+    "gate": {"up": "open", "auf": "open", "on": "open", "down": "close", "zu": "close", "off": "close"},
+    "dimmable": {"set": "dim", "brightness": "dim", "level": "dim", "value": "dim", "helligkeit": "dim", "position": "dim"},
+    "color": {"hue": "color", "farbe": "color", "temperature": "white", "kelvin": "white", "weiß": "white", "white_temp": "white"},
+    "climate": {"set": "temperature", "temp": "temperature", "setpoint": "temperature", "heat": "temperature", "betriebsart": "mode"},
+    "value": {"dim": "set", "position": "set", "value": "set", "level": "set"},
+    "alarm": {"on": "arm", "activate": "arm", "scharf": "arm", "off": "disarm", "unscharf": "disarm", "acknowledge": "quit"},
+    "radio": {"set": "select", "on": "select", "choose": "select"},
+    "updown": {"open": "up", "raise": "up", "close": "down", "lower": "down"},
 }
 
 ALL_ACTIONS = sorted({a for actions in ACTIONS.values() for a in actions})
 
-GROUP_PREFIX = {"light": "L", "climate": "K", "shading": "B", "gate": "T", "alarm": "A", "other": "X"}
+GROUP_PREFIX = {"light": "L", "climate": "K", "shading": "B", "gate": "T", "alarm": "A", "window": "F", "sensor": "S", "other": "X"}
 GROUP_LABEL = {
     "light": "Licht",
     "climate": "Klima",
     "shading": "Beschattung",
     "gate": "Tor",
     "alarm": "Alarm",
+    "window": "Fenster",
+    "sensor": "Sensor",
     "other": "Sonstiges",
 }
 
@@ -92,6 +125,27 @@ _DOOR_OPENER = re.compile(r"t(ü|ue)r\s*(ö|oe)ffn|door\s*open|summer|buzzer|t(�
 MOOD_OFF = 778
 MOOD_BRIGHT = 777
 
+ROOM_MODES = {0: "Automatik", 1: "Automatik Heizen", 2: "Automatik Kühlen", 3: "Manuell", 4: "Manuell Heizen", 5: "Manuell Kühlen"}
+
+# Usage hints per block type for the device list Gemini reads.
+TYPE_HINTS = {
+    "Dimmer": "dim 0-100 %",
+    "EIBDimmer": "dim 0-100 %",
+    "LightControllerV2": "dim 0-100 % für alle Kreise, scene = Stimmung",
+    "ColorPickerV2": "color = Farbton 0-360 (0 rot, 30 orange, 60 gelb, 120 grün, 180 türkis, 240 blau, 300 lila), white = 2700-6500 K, value2 = Helligkeit",
+    "TimedSwitch": "on startet den Nachlauf",
+    "Pushbutton": "press = Tastendruck",
+    "Jalousie": "position 0 = ganz offen, 100 = ganz zu; slat = Lamellen 0 offen bis 100 zu; shade = Beschattungsposition",
+    "CentralJalousie": "wirkt auf mehrere Rollos zugleich",
+    "Window": "position 0 = zu, 100 = ganz offen",
+    "Gate": "open, close, stop",
+    "CentralGate": "wirkt auf mehrere Tore",
+    "IRoomControllerV2": "temperature = Komfort-Solltemperatur 5-30 °C; mode 0 Automatik, 1 Auto Heizen, 2 Auto Kühlen, 3 Manuell, 4 Manuell Heizen, 5 Manuell Kühlen",
+    "Alarm": "arm, disarm, quit",
+    "UpDownDigital": "up/down als kurzer Impuls",
+    **{t: "nur zum Ablesen" for t in SENSOR_TYPES},
+}
+
 
 class ActionError(ValueError):
     pass
@@ -109,6 +163,10 @@ def group_of(control: LoxControl) -> str | None:
         return "gate"
     if t in ALARM_TYPES:
         return "alarm"
+    if t in WINDOW_TYPES:
+        return "window"
+    if t in SENSOR_TYPES:
+        return "sensor"
     if t in LIGHT_TYPES:
         return "light"
     if t in SWITCH_TYPES:
@@ -204,7 +262,7 @@ class Catalog:
                 used.add(short)
                 self._db.execute(
                     "INSERT INTO controls(uuid, short_id, name, type, room, category, parent, allowed, critical, aliases, present) "
-                    "VALUES(?,?,?,?,?,?,?,0,?,'[]',1)",
+                    "VALUES(?,?,?,?,?,?,?,?,?,'[]',1)",
                     (
                         control.uuid,
                         short,
@@ -213,6 +271,7 @@ class Catalog:
                         control.room,
                         control.category,
                         control.parent,
+                        int(group == "sensor"),
                         int(default_critical(control, group)),
                     ),
                 )
@@ -366,10 +425,42 @@ class Catalog:
                 names = {m["id"]: m.get("name", "") for m in self.moods(entry.uuid, state)}
                 return "Szene " + ", ".join(names.get(i, str(i)) for i in ids)
             if t == "ColorPickerV2":
-                return str(get("color") or "")
+                return _describe_color(get("color"))
             if t == "Jalousie":
                 pos = get("position")
-                return "" if pos is None else f"{pos * 100:.0f} % geschlossen"
+                if pos is None:
+                    return ""
+                slat = get("shadePosition")
+                text = "ganz offen" if pos <= 0.01 else "ganz zu" if pos >= 0.99 else f"{pos * 100:.0f} % geschlossen"
+                return text + (f", Lamellen {slat * 100:.0f} %" if slat is not None else "")
+            if t == "Window":
+                pos = get("position")
+                if pos is None:
+                    return ""
+                return "zu" if pos <= 0.01 else "ganz offen" if pos >= 0.99 else f"{pos * 100:.0f} % offen"
+            if t == "InfoOnlyAnalog":
+                value = get("value")
+                return "" if value is None else _format(self._details(entry).get("format"), value)
+            if t == "InfoOnlyDigital":
+                active = bool(get("active"))
+                texts = self._details(entry).get("text") or {}
+                return str(texts.get("on" if active else "off") or ("an" if active else "aus"))
+            if t in ("InfoOnlyText", "TextState"):
+                return _plain_text(get("textAndIcon") or get("text"))
+            if t == "Meter":
+                d = self._details(entry)
+                actual, total = get("actual"), get("total")
+                parts = []
+                if actual is not None:
+                    parts.append("aktuell " + _format(d.get("actualFormat"), actual))
+                if total is not None:
+                    parts.append("gesamt " + _format(d.get("totalFormat"), total))
+                return ", ".join(parts)
+            if t == "PresenceDetector":
+                return "Anwesenheit erkannt" if get("active") else "niemand erkannt"
+            if t == "WindowMonitor":
+                counts = [(get("numOpen"), "offen"), (get("numTilted"), "gekippt"), (get("numClosed"), "zu")]
+                return ", ".join(f"{int(n)} {label}" for n, label in counts if n is not None)
             if t == "Gate":
                 pos = get("position")
                 if pos is None:
@@ -379,7 +470,9 @@ class Catalog:
                 actual, target = get("tempActual"), get("tempTarget")
                 if actual is None:
                     return ""
-                return f"ist {actual:.1f} °C, Soll {target:.1f} °C" if target is not None else f"ist {actual:.1f} °C"
+                text = f"ist {actual:.1f} °C, Soll {target:.1f} °C" if target is not None else f"ist {actual:.1f} °C"
+                mode = get("operatingMode")
+                return text + (f", {ROOM_MODES.get(int(mode), '')}" if mode is not None and int(mode) in ROOM_MODES else "")
             if t == "Alarm":
                 return "scharf" if (get("armed") or 0) > 0 else "unscharf"
             if t == "Radio":
@@ -388,8 +481,8 @@ class Catalog:
                 return outputs.get(str(active), "aus" if active == 0 else str(active))
             if t in ("Slider", "ValueSelector", "UpDownAnalog"):
                 value = get("value")
-                return "" if value is None else f"{value:g}"
-        except (TypeError, ValueError):
+                return "" if value is None else _format(self._details(entry).get("format"), value)
+        except (TypeError, ValueError, KeyError):
             return ""
         return ""
 
@@ -398,6 +491,12 @@ class Catalog:
         return control.details if control else {}
 
     def extras(self, entry: Entry, state: StateGetter) -> str:
+        t = entry.type
+        hint = TYPE_HINTS.get(t, "")
+        more = self._extras(entry, state)
+        return "; ".join(x for x in (more, hint) if x)
+
+    def _extras(self, entry: Entry, state: StateGetter) -> str:
         if entry.type == "LightControllerV2":
             moods = [m.get("name", "") for m in self.moods(entry.uuid, state) if m.get("id") != MOOD_OFF]
             return "Szenen: " + ", ".join(m for m in moods if m) if moods else ""
@@ -407,19 +506,47 @@ class Catalog:
         if entry.type == "Radio":
             outputs = self._details(entry).get("outputs") or {}
             return "Auswahl: " + ", ".join(f"{k}={v}" for k, v in outputs.items()) if outputs else ""
-        if entry.type == "IRoomControllerV2":
-            return "mode: 0 Automatik, 1 Auto Heizen, 2 Auto Kühlen, 3 Manuell, 4 Manuell Heizen, 5 Manuell Kühlen"
-        if entry.type == "Jalousie":
-            return "position: 0 = ganz offen, 100 = ganz zu"
         if entry.type in ("Slider", "ValueSelector", "UpDownAnalog"):
             d = self._details(entry)
             if "min" in d and "max" in d:
-                return f"Wert {d['min']}..{d['max']}"
+                unit = _unit(d.get("format"))
+                return f"Wert {d['min']:g}..{d['max']:g}{' ' + unit if unit else ''}"
         return ""
+
+    def is_on(self, entry: Entry, state: StateGetter) -> bool:
+        text = self.describe_state(entry, state)
+        return bool(text) and not re.match(r"^(aus|zu|ganz offen|unscharf|geschlossen|niemand)", text)
+
+    def normalize(self, entry: Entry, action: str, value: Any, state: StateGetter) -> tuple[str, Any]:
+        """Map the many ways to say an action onto what this block understands."""
+        t = entry.type
+        allowed = ACTIONS.get(t, ())
+        action = str(action or "").strip().lower().replace(" ", "_")
+        if action in allowed:
+            pass
+        else:
+            action = _COMMON_ALIASES.get(action, action)
+            family = _family(t)
+            for name in family:
+                action = _TYPE_ALIASES.get(name, {}).get(action, action)
+        if t == "LightControllerV2" and action in ("mood", "stimmung", "szene"):
+            action = "scene"
+        if action == "toggle":
+            action = "off" if self.is_on(entry, state) else "on"
+            action = _TYPE_ALIASES.get("gate", {}).get(action, action) if t in GATE_TYPES else action
+        number = _number(value)
+        if action == "dim" and number == 0 and "off" in allowed:
+            action = "off"
+        elif action == "on" and number is not None and 0 < number < 100 and "dim" in allowed:
+            action = "dim"
+        return action, value
 
     # -------------------------------------------------------------- commands
     def commands(self, entry: Entry, action: str, value: Any, value2: Any, state: StateGetter) -> list[tuple[str, str]]:
         allowed = ACTIONS.get(entry.type, ())
+        if not allowed:
+            raise ActionError(f"{entry.name} ist nur zum Ablesen da: {self.describe_state(entry, state) or 'kein Wert'}")
+        action, value = self.normalize(entry, action, value, state)
         if action not in allowed:
             raise ActionError(f"{entry.name} kann '{action}' nicht. Möglich: {', '.join(allowed)}")
         t = entry.type
@@ -484,7 +611,13 @@ class Catalog:
             mapping = {"up": "FullUp", "down": "FullDown", "stop": "stop", "shade": "shade"}
             if action == "position":
                 return [(uuid, f"manualPosition/{number(0, 100):.0f}")]
+            if action == "slat":
+                return [(uuid, f"manualLamelle/{number(0, 100):.0f}")]
             return [(uuid, mapping[action])]
+        if t == "Window":
+            if action == "position":
+                return [(uuid, f"moveToPosition/{number(0, 100):.0f}")]
+            return [(uuid, {"open": "fullopen", "close": "fullclose", "stop": "stop"}[action])]
         if t in GATE_TYPES:
             return [(uuid, action)]
         if t == "IRoomControllerV2":
@@ -537,3 +670,86 @@ def _hsv(color: Any) -> tuple[int, int, int]:
             h, s, v = (int(float(x)) for x in match.groups())
             return h, s, v
     return 0, 0, 100
+
+
+def _family(t: str) -> tuple[str, ...]:
+    if t in SHADING_TYPES:
+        return ("shading",)
+    if t in WINDOW_TYPES:
+        return ("window",)
+    if t in GATE_TYPES:
+        return ("gate",)
+    if t == "ColorPickerV2":
+        return ("color", "dimmable")
+    if t in ("Dimmer", "EIBDimmer", "LightControllerV2", "LightsceneRGB"):
+        return ("dimmable",)
+    if t in CLIMATE_TYPES:
+        return ("climate",)
+    if t in ("Slider", "ValueSelector", "UpDownAnalog"):
+        return ("value",)
+    if t in ALARM_TYPES:
+        return ("alarm",)
+    if t == "Radio":
+        return ("radio",)
+    if t == "UpDownDigital":
+        return ("updown",)
+    return ()
+
+
+def _number(value: Any) -> float | None:
+    try:
+        n = float(str(value).replace(",", ".").rstrip("%").strip())
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(n) else n
+
+
+_PRINTF = re.compile(r"%(\.(\d+))?[fdi]")
+
+
+def _format(fmt: Any, value: Any) -> str:
+    """Apply a Loxone printf format like '%.1f°C' or '%.0f%%'."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if not isinstance(fmt, str) or "%" not in fmt:
+        return f"{number:g}"
+    match = _PRINTF.search(fmt)
+    if not match:
+        return f"{number:g} {fmt.replace('%%', '%')}".strip()
+    digits = int(match.group(2)) if match.group(2) else (0 if fmt[match.end() - 1] in "di" else 2)
+    rendered = f"{number:.{digits}f}"
+    return (fmt[: match.start()] + rendered + fmt[match.end():]).replace("%%", "%").strip()
+
+
+def _unit(fmt: Any) -> str:
+    if not isinstance(fmt, str):
+        return ""
+    return _PRINTF.sub("", fmt).replace("%%", "%").strip()
+
+
+def _plain_text(value: Any) -> str:
+    if isinstance(value, str):
+        try:
+            data = json.loads(value)
+        except ValueError:
+            return value[:120]
+        if isinstance(data, dict):
+            return str(data.get("text") or "")[:120]
+    return "" if value is None else str(value)[:120]
+
+
+def _describe_color(color: Any) -> str:
+    if not isinstance(color, str):
+        return ""
+    temp = re.match(r"temp\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)", color)
+    if temp:
+        bri, kelvin = float(temp.group(1)), float(temp.group(2))
+        return "aus" if bri <= 0 else f"weiß {kelvin:.0f} K, {bri:.0f} %"
+    h, s, v = _hsv(color)
+    if v <= 0:
+        return "aus"
+    names = [(15, "rot"), (45, "orange"), (75, "gelb"), (165, "grün"), (195, "türkis"), (265, "blau"), (330, "lila"), (360, "rot")]
+    name = next(label for limit, label in names if h <= limit)
+    return f"{name if s > 20 else 'weiß'}, {v} %"

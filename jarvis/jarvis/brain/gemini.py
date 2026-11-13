@@ -217,7 +217,10 @@ class Brain:
         for entry in entries:
             state = house.catalog.describe_state(entry, house.miniserver.state)
             extra = house.catalog.extras(entry, house.miniserver.state)
-            label = {"light": "Licht", "climate": "Klima", "shading": "Beschattung", "gate": "Tor", "alarm": "Alarm"}.get(
+            label = {
+                "light": "Licht", "climate": "Klima", "shading": "Beschattung", "gate": "Tor", "alarm": "Alarm",
+                "window": "Fenster", "sensor": "Sensor",
+            }.get(
                 entry.group, "Gerät"
             )
             flag = " (Bestätigung nötig)" if entry.critical else ""

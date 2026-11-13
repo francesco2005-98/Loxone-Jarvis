@@ -26,12 +26,12 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 INTENTS = (
-    "light_on", "light_off", "dim", "scene", "shade_up", "shade_down", "time", "date", "failed", "offline",
+    "light_on", "light_off", "dim", "scene", "shade_up", "shade_down", "time", "date", "temperature", "failed", "offline",
     "offer_done", "offer_declined",
 )
 REQUIRED = {
     "light_on": "{raum}", "light_off": "{raum}", "shade_up": "{raum}", "shade_down": "{raum}",
-    "dim": "{wert}", "scene": "{wert}", "time": "{uhrzeit}", "date": "{datum}",
+    "dim": "{wert}", "scene": "{wert}", "temperature": "{wert}", "time": "{uhrzeit}", "date": "{datum}",
 }
 PLACEHOLDERS = ("{raum}", "{, anrede}", "{wert}", "{uhrzeit}", "{datum}")
 MIN_VARIANTS = 2
@@ -79,6 +79,11 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
             "Heute ist {datum}{, anrede}.",
             "Wir haben {datum}{, anrede}.",
         ],
+        "temperature": [
+            "Es hat {wert} {raum}{, anrede}.",
+            "Gerade sind es {wert} {raum}{, anrede}.",
+            "Aktuell {wert} {raum}{, anrede}.",
+        ],
         "failed": [
             "Verzeihung{, anrede}, das hat nicht geklappt.",
             "Das ließ sich leider nicht ausführen{, anrede}.",
@@ -106,6 +111,7 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
         "shade_down": ["Lowering the blinds {raum}{, anrede}.", "Blinds {raum} going down{, anrede}."],
         "time": ["It is {uhrzeit}{, anrede}.", "The time is {uhrzeit}{, anrede}."],
         "date": ["Today is {datum}{, anrede}.", "It is {datum}{, anrede}."],
+        "temperature": ["It is {wert} {raum}{, anrede}.", "Currently {wert} {raum}{, anrede}."],
         "failed": ["My apologies{, anrede}, that did not work.", "I'm afraid that failed{, anrede}."],
         "offline": ["My apologies{, anrede}, Gemini is unreachable. Lights and blinds still work."],
         "scene": ["Mood {wert} {raum}{, anrede}.", "Very good{, anrede}. {wert} is set."],
@@ -119,9 +125,10 @@ Jede Situation bekommt 6 abwechslungsreiche, kurze Sätze (höchstens 12 Wörter
 Platzhalter exakt so übernehmen:
 - {raum}: Ortsangabe wie "im Esszimmer" oder leer. Muss in light_on, light_off, shade_up, shade_down vorkommen.
 - {, anrede}: wird zu ", Sir" oder entfällt. Nur dort, wo eine Anrede mit Komma natürlich klingt.
-- {wert}: Prozentzahl in dim, Name der Stimmung in scene; dort Pflicht. {uhrzeit}: Uhrzeit, Pflicht in time. {datum}: Datum, Pflicht in date.
+- {wert}: Prozentzahl in dim, Name der Stimmung in scene, Temperatur in temperature; dort Pflicht. {uhrzeit}: Uhrzeit, Pflicht in time. {datum}: Datum, Pflicht in date.
 Situationen: light_on (Licht an), light_off (Licht aus), dim (Licht gedimmt), scene (Lichtstimmung {wert} aktiv),
 shade_up (Rollos hoch), shade_down (Rollos runter), time (Uhrzeit nennen), date (Datum nennen),
+temperature (Temperatur {wert} nennen, {raum} wie "im Bad" oder "draußen"),
 failed (Aktion fehlgeschlagen), offline (KI nicht erreichbar, Licht und Rollos funktionieren weiter),
 offer_done (dein eigener Vorschlag wurde nach einem Ja ausgeführt, sehr kurz),
 offer_declined (dein Vorschlag wurde abgelehnt, kurz und gelassen).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ..areas import Area
 from ..loxone.catalog import ACTIONS, ALL_ACTIONS, ActionError, Entry
+from ..loxone.client import NotConnected
 
 if TYPE_CHECKING:
     from ..house import House
@@ -269,8 +271,10 @@ class ToolRunner:
             if not isinstance(item, dict):
                 continue
             entry = house.catalog.get(str(item.get("device", "")).strip().upper())
-            action = str(item.get("action", "")).strip()
-            if entry is None or not entry.allowed or entry.critical or action not in ACTIONS.get(entry.type, ()):
+            if entry is None:
+                continue
+            action, _ = house.catalog.normalize(entry, str(item.get("action", "")), item.get("value"), house.miniserver.state)
+            if not entry.allowed or entry.critical or action not in ACTIONS.get(entry.type, ()):
                 continue
             if house.coordinator.declined(turn.area.id, entry.uuid, action):
                 continue
@@ -281,9 +285,11 @@ class ToolRunner:
 
     async def execute(self, entry: Entry, action: str, value: Any, value2: Any, turn: Turn | None) -> dict:
         house = self.house
-        commands = house.catalog.commands(entry, action, value, value2, house.miniserver.state)
+        state = house.miniserver.state
+        commands = house.catalog.commands(entry, action, value, value2, state)
+        action, value = house.catalog.normalize(entry, action, value, state)
         for uuid, cmd in commands:
-            reply = await house.miniserver.command(uuid, cmd)
+            reply = await self._send(uuid, cmd)
             if not reply.ok:
                 return {"device": entry.short_id, "error": f"Miniserver meldet Code {reply.code}"}
         label = f"{entry.name}: {action}" + (f" {value}" if value not in (None, "") else "")
@@ -291,6 +297,18 @@ class ToolRunner:
             turn.done.append(label)
         house.events.log("action", label, entry.room or "")
         return {"device": entry.short_id, "ok": True}
+
+    async def _send(self, uuid: str, cmd: str):
+        """One retry when the Miniserver connection was just lost and comes straight back."""
+        miniserver = self.house.miniserver
+        try:
+            return await miniserver.command(uuid, cmd)
+        except NotConnected:
+            for _ in range(10):
+                await asyncio.sleep(0.2)
+                if miniserver.connected:
+                    return await miniserver.command(uuid, cmd)
+            raise ActionError("Miniserver gerade nicht verbunden") from None
 
     # ---------------------------------------------------------------- music
     def _target_areas(self, names: list[str] | None, turn: Turn) -> list[Area]:
