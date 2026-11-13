@@ -44,10 +44,16 @@ def build_system(
     areas: list[str],
     favorites: list[str],
     config_available: bool,
+    location: str | None = None,
 ) -> str:
     parts = [persona.strip(), "", RULES, ""]
     when = f"{WEEKDAYS[now.weekday()]}, {now:%d.%m.%Y %H:%M} ({now.tzinfo})"
     parts.append(f"JETZT: {when}")
+    if location:
+        parts.append(
+            f"STANDORT DES HAUSES: {location}. Wetter, Sonne, Öffnungszeiten, Verkehr und „hier in der Nähe“ "
+            "beziehen sich auf diesen Ort, wenn kein anderer genannt wird."
+        )
     rooms = ", ".join(area_rooms) if area_rooms else "keine zugeordnet"
     parts.append(f"BEREICH: {area_name} (Loxone-Räume: {rooms}). Hauptlicht: {main_light or 'nicht festgelegt'}.")
     if speaker and speaker.anrede:

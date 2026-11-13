@@ -28,6 +28,7 @@ class LoxControl:
 @dataclass
 class Structure:
     ms_name: str = ""
+    location: str = ""
     serial: str = ""
     last_modified: str = ""
     rooms: dict[str, str] = field(default_factory=dict)
@@ -105,6 +106,7 @@ def parse(data: dict) -> Structure:
     cats = data.get("cats") or {}
     structure = Structure(
         ms_name=str(info.get("msName", "")),
+        location=str(info.get("location", "") or ""),
         serial=str(info.get("serialNr", "")),
         last_modified=str(data.get("lastModified", "")),
         rooms=rooms,

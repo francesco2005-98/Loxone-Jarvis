@@ -207,6 +207,7 @@ footer .progress { position: absolute; left: 0; bottom: 0; height: 2px; backgrou
 .person { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .person:last-child { border-bottom: 0; }
 .person .name { font-weight: 600; font-size: 1.05em; }
+.loc-result { white-space: normal; text-align: left; justify-content: flex-start; text-transform: none; letter-spacing: 0; font-family: var(--sans); line-height: 1.35; }
 
 /* ------------------------------------------------------------------- ai */
 .ai-grid { grid-template-columns: 1.6fr 1fr; }

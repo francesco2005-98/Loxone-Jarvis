@@ -1,4 +1,4 @@
-import { card, clear, confirmDialog, countUp, h, modal, pageHead, pill, selectEl, timeAgo, toast } from "../dom.js";
+import { busy, card, clear, confirmDialog, countUp, h, modal, pageHead, pill, selectEl, timeAgo, toast } from "../dom.js";
 
 const ANREDE = [
   { value: "name", label: "Eigener Name" },
@@ -61,17 +61,128 @@ export default function overview(view, ctx) {
   const notes = h("textarea", { class: "input", rows: 6, placeholder: "z. B. Wir essen meistens um 19 Uhr. Die Katze heißt Mila." });
   const tzSelect = selectEl(timezones(), "Europe/Berlin");
   const saveHouse = h("button", { class: "btn primary", type: "button" }, "Speichern");
-  saveHouse.addEventListener("click", async () => {
+
+  // Location: picked from the search, from the device, or found automatically when saving a typed address.
+  const site = { label: "", lat: null, lon: null };
+  const locInput = h("input", { class: "input", maxlength: 200, placeholder: "Adresse, z. B. Musterstraße 1, 80331 München" });
+  const locSearch = h("button", { class: "btn", type: "button" }, "Suchen");
+  const locHere = h("button", { class: "btn", type: "button" }, "Aktuellen Standort verwenden");
+  const locResults = h("div", { class: "stack" });
+  const locInfo = h("div", { class: "hint" });
+  if (!navigator.geolocation || !window.isSecureContext) locHere.style.setProperty("display", "none");
+
+  function showPlace() {
+    clear(locInfo);
+    if (site.lat === null || site.lon === null) {
+      locInfo.append(site.label ? "Noch ohne Koordinaten. „Suchen“ oder Speichern findet sie." : "Noch kein Standort festgelegt.");
+      return;
+    }
+    const map = `https://www.openstreetmap.org/?mlat=${site.lat}&mlon=${site.lon}#map=17/${site.lat}/${site.lon}`;
+    locInfo.append(`Breite ${site.lat.toFixed(5)} · Länge ${site.lon.toFixed(5)} · `, h("a", { href: map, target: "_blank", rel: "noopener noreferrer" }, "Auf der Karte prüfen"));
+  }
+
+  function pick(result) {
+    site.label = result.label;
+    site.lat = result.lat;
+    site.lon = result.lon;
+    locInput.value = result.label;
+    clear(locResults);
+    showPlace();
+  }
+
+  async function findPlaces() {
+    const query = locInput.value.trim();
+    if (query.length < 2) return [];
+    const res = await ctx.api("/location/search", { method: "POST", body: { query } });
+    return res.results;
+  }
+
+  locSearch.addEventListener("click", () => busy(locSearch, async () => {
+    clear(locResults);
     try {
-      await ctx.api("/settings", { method: "PUT", body: { values: { "house.notes": notes.value, "house.timezone": tzSelect.value } } });
+      const results = await findPlaces();
+      if (!results.length) {
+        locResults.append(h("p", { class: "muted small" }, "Nichts gefunden. Ort und Straße genauer angeben."));
+        return;
+      }
+      if (results.length === 1) return pick(results[0]);
+      for (const result of results) {
+        locResults.append(h("button", { class: "btn small loc-result", type: "button", on: { click: () => pick(result) } }, result.label));
+      }
+    } catch (e) {
+      toast(e.message, "bad");
+    }
+  }));
+  locInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      locSearch.click();
+    }
+  });
+  locInput.addEventListener("input", () => {
+    if (locInput.value.trim() !== site.label) {
+      site.lat = null;
+      site.lon = null;
+      showPlace();
+    }
+  });
+  locHere.addEventListener("click", () => busy(locHere, () => new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          pick(await ctx.api("/location/reverse", { method: "POST", body: { lat: pos.coords.latitude, lon: pos.coords.longitude } }));
+        } catch (e) {
+          toast(e.message, "bad");
+        }
+        resolve();
+      },
+      (err) => {
+        toast(`Standort nicht verfügbar: ${err.message}`, "bad");
+        resolve();
+      },
+      { enableHighAccuracy: true, timeout: 15000 },
+    );
+  })));
+
+  saveHouse.addEventListener("click", () => busy(saveHouse, async () => {
+    try {
+      const typed = locInput.value.trim();
+      if (typed && (site.lat === null || typed !== site.label)) {
+        const results = await findPlaces().catch(() => []);
+        if (results.length) {
+          pick(results[0]);
+          toast(`Standort gefunden: ${results[0].label}`);
+        } else {
+          site.label = typed;
+        }
+      }
+      if (!typed) Object.assign(site, { label: "", lat: null, lon: null });
+      await ctx.api("/settings", {
+        method: "PUT",
+        body: { values: { "house.notes": notes.value, "house.timezone": tzSelect.value, "house.location": site.label, "house.lat": site.lat, "house.lon": site.lon } },
+      });
+      showPlace();
       toast("Haushalt gespeichert");
     } catch (e) {
       toast(e.message, "bad");
     }
-  });
+  }));
   const houseCard = card(
     "Haushalt",
-    h("div", { class: "stack" }, h("div", { class: "label" }, "Notizen des Haushalts"), notes, h("div", { class: "label" }, "Zeitzone für Timer und Erinnerungen"), tzSelect, h("div", { class: "row" }, h("span", { class: "spacer" }), saveHouse)),
+    h(
+      "div",
+      { class: "stack" },
+      h("div", { class: "label" }, "Standort des Hauses"),
+      h("div", { class: "row" }, locInput, locSearch),
+      locResults,
+      locInfo,
+      h("div", { class: "row" }, locHere),
+      h("div", { class: "label" }, "Notizen des Haushalts"),
+      notes,
+      h("div", { class: "label" }, "Zeitzone für Timer und Erinnerungen"),
+      tzSelect,
+      h("div", { class: "row" }, h("span", { class: "spacer" }), saveHouse),
+    ),
   );
   root.append(h("div", { class: "grid lower" }, peopleCard, houseCard));
 
@@ -285,6 +396,11 @@ export default function overview(view, ctx) {
       renderUsage(data.usage);
       notes.value = data.notes || "";
       tzSelect.value = data.timezone;
+      const loc = data.location || {};
+      Object.assign(site, { label: loc.label || "", lat: loc.lat ?? null, lon: loc.lon ?? null });
+      locInput.value = site.label || loc.suggestion || "";
+      if (!site.label && loc.suggestion) locInput.placeholder = `Aus Loxone: ${loc.suggestion}`;
+      showPlace();
       loadPeople();
     } catch (e) {
       toast(e.message, "bad");

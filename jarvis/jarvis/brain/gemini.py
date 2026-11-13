@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from ..location import sun_times
 from ..loxone.catalog import ACTIONS
 from .prompt import SpeakerInfo, build_system
 from .tools import ToolRunner, Turn, settled
@@ -190,7 +191,21 @@ class Brain:
             areas=[a.name for a in house.areas.list()],
             favorites=house.cached_favorites(area),
             config_available=config_available,
+            location=self.location_line(),
         )
+
+    def location_line(self) -> str | None:
+        settings = self.house.settings
+        label = settings.get("house.location")
+        lat, lon = settings.get("house.lat"), settings.get("house.lon")
+        if lat is None or lon is None:
+            return label or None
+        line = f"{label or 'ohne Adresse'} (Breite {lat:.4f}, Länge {lon:.4f})"
+        tz = settings.tz
+        rise, sets = sun_times(lat, lon, datetime.now(tz).date(), tz)
+        if rise and sets:
+            line += f"; heute Sonnenaufgang {rise:%H:%M}, Sonnenuntergang {sets:%H:%M}"
+        return line
 
     async def answer(self, turn: Turn, history: list) -> tuple[str, list]:
         from google.genai import types
@@ -244,6 +259,9 @@ class Brain:
             + datetime.now(self.house.settings.tz).strftime("%d.%m.%Y %H:%M")
             + "."
         )
+        where = self.location_line()
+        if where:
+            system += f" Das Haus steht hier: {where}. Fragen ohne Ort (Wetter, Öffnungszeiten, Verkehr) beziehen sich darauf."
         response = await self.generate(
             [types.Content(role="user", parts=[types.Part.from_text(text=query)])],
             self._config(system, search=True),
