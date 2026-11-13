@@ -7,7 +7,7 @@ import time
 import aiohttp
 
 from ..settings import Settings
-from .pronounce import pronounce
+from .pronounce import clip, pronounce
 
 
 class TtsError(RuntimeError):
@@ -38,7 +38,7 @@ class Piper:
 
     async def synthesize(self, text: str, lang: str, voice: str | None = None) -> bytes:
         payload = {
-            "text": pronounce(text, lang)[:1500],
+            "text": clip(pronounce(text, lang)),
             "voice": voice or self.voice_for(lang),
             "length_scale": round(1.0 / float(self.settings.get("voice.speed")), 3),
         }
