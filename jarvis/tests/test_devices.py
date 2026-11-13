@@ -188,3 +188,15 @@ def test_a_critical_question_survives_an_unclear_answer(home):
     assert session.pending is not None and session.pending.kind == "control", "the question stays open"
     run(house.coordinator.handle_text(session, area, "Ja", "de", None))
     assert session.pending is None, "the yes was taken and the question is closed"
+
+
+def test_misheard_room_names_are_corrected(home):
+    house, area, _ = home
+    house.areas.update(area.id, rooms=["Schlafzimmer", "Esszimmer", "Wohnzimmer"])
+    from jarvis.voice.correct import correct
+
+    assert correct("Mach das Licht im Cafzimmer an", house) == "Mach das Licht im Schlafzimmer an"
+    assert correct("Licht im Esszimma aus", house) == "Licht im Esszimmer aus"
+    assert correct("im Schlafzimmer", house) == "im Schlafzimmer", "a correct name stays"
+    assert correct("im Bad", house) == "im Bad", "short unknown words stay"
+    assert correct("Mach das Licht im Keller an", house) == "Mach das Licht im Keller an", "a real other room is not rewritten"

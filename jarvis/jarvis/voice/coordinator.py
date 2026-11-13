@@ -20,6 +20,7 @@ from ..people import ENROLL_SENTENCES
 from ..settings import ANREDE_LABELS
 from .arbitration import ARBITRATION_WINDOW, AreaSession, Offer, Phase, rms
 from .speaker import identify, profile_from
+from .correct import correct
 from .vad import Endpointer, VadConfig, high_pass
 
 if TYPE_CHECKING:
@@ -336,6 +337,7 @@ class Coordinator:
     async def handle_text(
         self, session: AreaSession, area: Area, text: str, lang: str, person_id: str | None, origin: str = ""
     ) -> tuple[str, list[str]]:
+        text = correct(text, self.house)
         if session.pending is not None:
             pending: Pending = session.pending  # type: ignore[assignment]
             session.pending = None
