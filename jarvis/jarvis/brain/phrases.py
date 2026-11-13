@@ -28,10 +28,12 @@ log = logging.getLogger(__name__)
 INTENTS = (
     "light_on", "light_off", "dim", "scene", "shade_up", "shade_down", "time", "date", "temperature", "failed", "offline",
     "offer_done", "offer_declined",
+    "timer_set", "reminder_set", "timer_left", "timer_none", "timer_cancel", "timer_due", "timer_due_plain", "reminder_due",
 )
 REQUIRED = {
     "light_on": "{raum}", "light_off": "{raum}", "shade_up": "{raum}", "shade_down": "{raum}",
     "dim": "{wert}", "scene": "{wert}", "temperature": "{wert}", "time": "{uhrzeit}", "date": "{datum}",
+    "timer_set": "{wert}", "reminder_set": "{wert}", "timer_left": "{wert}", "timer_due": "{wert}", "reminder_due": "{wert}",
 }
 PLACEHOLDERS = ("{raum}", "{, anrede}", "{wert}", "{uhrzeit}", "{datum}")
 MIN_VARIANTS = 2
@@ -102,6 +104,40 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
             "Wie Sie meinen{, anrede}.",
             "Dann lasse ich es so{, anrede}.",
         ],
+        "timer_set": [
+            "Sehr wohl{, anrede}. Timer läuft, {wert}.",
+            "Timer auf {wert} gestellt{, anrede}.",
+            "In {wert} melde ich mich{, anrede}.",
+        ],
+        "reminder_set": [
+            "Sehr wohl{, anrede}, ich erinnere Sie {wert}.",
+            "Notiert{, anrede}. Ich melde mich {wert}.",
+            "Ich denke daran{, anrede}, {wert}.",
+        ],
+        "timer_left": [
+            "Noch {wert}{, anrede}.",
+            "Der Timer läuft noch {wert}{, anrede}.",
+        ],
+        "timer_none": [
+            "Es läuft gerade kein Timer{, anrede}.",
+            "Derzeit ist kein Timer gestellt{, anrede}.",
+        ],
+        "timer_cancel": [
+            "Timer gestoppt{, anrede}.",
+            "Erledigt{, anrede}, der Timer ist abgebrochen.",
+        ],
+        "timer_due": [
+            "Verzeihung{, anrede}, die Zeit für {wert} ist um.",
+            "Ihr Timer für {wert} ist abgelaufen{, anrede}.",
+        ],
+        "timer_due_plain": [
+            "Verzeihung{, anrede}, Ihr Timer ist abgelaufen.",
+            "Die Zeit ist um{, anrede}.",
+        ],
+        "reminder_due": [
+            "Erinnerung{, anrede}: {wert}.",
+            "Sie wollten daran denken{, anrede}: {wert}.",
+        ],
     },
     "en": {
         "light_on": ["Very good{, anrede}. Lights {raum} are on.", "Lights {raum} on{, anrede}.", "Done{, anrede}. Let there be light {raum}."],
@@ -117,6 +153,14 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
         "scene": ["Mood {wert} {raum}{, anrede}.", "Very good{, anrede}. {wert} is set."],
         "offer_done": ["Very good{, anrede}.", "Done{, anrede}.", "As you wish{, anrede}."],
         "offer_declined": ["Very well{, anrede}.", "As you wish{, anrede}.", "I'll leave it then{, anrede}."],
+        "timer_set": ["Very good{, anrede}. Timer set for {wert}.", "I'll let you know in {wert}{, anrede}."],
+        "reminder_set": ["Very good{, anrede}, I'll remind you {wert}.", "Noted{, anrede}. I'll remind you {wert}."],
+        "timer_left": ["{wert} to go{, anrede}.", "The timer has {wert} left{, anrede}."],
+        "timer_none": ["No timer is running{, anrede}.", "There is no timer set{, anrede}."],
+        "timer_cancel": ["Timer cancelled{, anrede}.", "Done{, anrede}, the timer is off."],
+        "timer_due": ["Pardon me{, anrede}, time is up for {wert}.", "Your {wert} timer is done{, anrede}."],
+        "timer_due_plain": ["Pardon me{, anrede}, your timer is done.", "Time is up{, anrede}."],
+        "reminder_due": ["A reminder{, anrede}: {wert}.", "You wanted me to remind you{, anrede}: {wert}."],
     },
 }
 
@@ -131,7 +175,11 @@ shade_up (Rollos hoch), shade_down (Rollos runter), time (Uhrzeit nennen), date 
 temperature (Temperatur {wert} nennen, {raum} wie "im Bad" oder "draußen"),
 failed (Aktion fehlgeschlagen), offline (KI nicht erreichbar, Licht und Rollos funktionieren weiter),
 offer_done (dein eigener Vorschlag wurde nach einem Ja ausgeführt, sehr kurz),
-offer_declined (dein Vorschlag wurde abgelehnt, kurz und gelassen).
+offer_declined (dein Vorschlag wurde abgelehnt, kurz und gelassen),
+timer_set (Timer gestellt, {wert} = Dauer wie "eine Stunde"), reminder_set (Erinnerung notiert, {wert} = "in 20 Minuten" oder "um 18 Uhr"),
+timer_left (Restzeit {wert} wie "42 Minuten für Essen"), timer_none (kein Timer läuft), timer_cancel (Timer gestoppt),
+timer_due (Timer abgelaufen, {wert} = Name wie "Essen"), timer_due_plain (Timer abgelaufen, ohne Namen),
+reminder_due (Erinnerung fällig, {wert} = Inhalt wie "die Wäsche").
 Antworte nur mit JSON: {"de": {"light_on": [...], ...}, "en": {"light_on": [...], ...}}. "en" auf Englisch."""
 
 

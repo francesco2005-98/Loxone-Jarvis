@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ..loxone.catalog import ACTIONS
+from .when import parse_duration
 
 if TYPE_CHECKING:
     from ..areas import Area
@@ -37,6 +38,10 @@ _DEVICE = r"(?P<device>(?:das |die |den |der )?[a-zäöüß][a-zäöüß0-9\- ]{
 _SPOT = r"(?: (?:am|an der|an dem|beim|bei der|über dem|über der|neben dem|neben der|hinter dem|hinter der) (?P<spot>[a-zäöüß0-9\- ]{2,30}?))?"
 _KIND = r"(?:das |die )?(?P<kind>indirekte|indirektes|indirekten|direkte|direktes|direkten) (?:licht|beleuchtung)"
 _MOOD = r"(?P<mood>[a-zäöüß][a-zäöüß0-9\- ]{2,30}?)"
+_TIMER_VERB = r"(?:(?:stell|stelle|setz|setze|mach|mache|starte|start|leg|lege)(?: mir| uns)? )?(?:bitte )?(?:mal )?"
+_TIMER_WORD = r"(?:einen |nen |den |ein )?(?:timer|wecker|kurzzeitwecker|eieruhr|countdown)"
+_REASON = r"(?: (?P<reason>(?:da|dann|weil|denn|wegen|damit|für|bis|zum|zur|das) .+))?"
+_REASON_WORDS = {"da", "dann", "weil", "denn", "wegen", "damit", "für", "bis"}
 
 PATTERNS: list[tuple[str, re.Pattern]] = [
     ("light", re.compile(rf"^{_VERB}(?P<lightword>{_LIGHT})(?: {_PREP} {_ROOM})?{_SPOT} (?:bitte )?{_STATE}{_END}$")),
@@ -54,6 +59,13 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     ("named", re.compile(rf"^{_VERB}{_PREP} {_ROOM} {_DEVICE}{_SPOT} {_STATE}{_END}$")),
     ("temp", re.compile(rf"^(?:wie warm|wie kalt|welche temperatur|wie viel grad|wieviel grad)(?: ist es| hat es| haben wir| herrscht)?(?: {_PREP} {_ROOM}| (?P<outside>draußen|draussen|außen|aussen|im freien))?{_END}$")),
     ("temp", re.compile(rf"^(?:temperatur)(?: {_PREP} {_ROOM}| (?P<outside>draußen|draussen|außen|aussen))?{_END}$")),
+    ("timer", re.compile(rf"^{_TIMER_VERB}{_TIMER_WORD}(?: (?:auf|für|in|von|über))? (?P<dur>.+?){_REASON}(?: an| ein| bitte)?$")),
+    ("timer", re.compile(rf"^{_TIMER_VERB}(?:in|für) (?P<dur>.+?) (?:einen |nen )?(?:timer|wecker){_REASON}(?: bitte)?$")),
+    ("timer", re.compile(r"^(?:set|start) (?:a )?timer (?:for )?(?P<dur>.+?)(?: (?P<reason>(?:for|because|when) .+))?$")),
+    ("reminder", re.compile(r"^erinnere? mich(?: bitte)? (?:in (?P<dur>.+?)|um (?P<clock>.+?)) (?P<reason>(?:an|ans|daran|dass|das|zu|zum|zur) .+)$")),
+    ("reminder", re.compile(r"^erinnere? mich(?: bitte)? (?P<reason>(?:an|ans|daran|dass) .+?) (?:in (?P<dur>.+)|um (?P<clock>.+))$")),
+    ("timer_left", re.compile(r"^(?:wie lange|wieviel zeit|wie viel zeit)(?: noch)?(?: läuft| hat| dauert| braucht)?(?: der| mein| unser)? (?:timer|wecker)(?: noch)?$")),
+    ("timer_cancel", re.compile(r"^(?:(?:stopp|stoppe|stop|lösch|lösche|beende|brich|cancel)(?: den| meinen| alle| die)? (?:timer|wecker)(?: ab)?|(?:timer|wecker) (?:aus|stopp|stoppen|abbrechen|löschen|beenden))$")),
     ("time", re.compile(r"^(?:wie spät ist es|wie viel uhr ist es|wieviel uhr ist es|wie spät haben wir|was ist die uhrzeit|uhrzeit)(?: bitte)?$")),
     ("time", re.compile(r"^(?:what time is it|what's the time|what is the time)(?: please)?$")),
     ("date", re.compile(r"^(?:welcher tag ist heute|welches datum (?:haben wir|ist heute)|der wievielte ist heute|was ist heute für ein tag)$")),
@@ -81,6 +93,8 @@ class QuickCommand:
     device: str | None = None
     light_kind: str | None = None
     scene: str | None = None
+    reason: str | None = None
+    clock: str | None = None
 
 
 def _norm(text: str) -> str:
@@ -96,8 +110,16 @@ def parse(text: str) -> QuickCommand | None:
             continue
         groups = match.groupdict()
         room = (groups.get("room") or "").strip() or None
-        if kind in ("time", "date"):
+        if kind in ("time", "date", "timer_left", "timer_cancel"):
             return QuickCommand(kind, None, None, kind)
+        if kind in ("timer", "reminder"):
+            reason = (groups.get("reason") or "").strip() or None
+            if groups.get("clock"):
+                return QuickCommand(kind, None, None, kind, reason=reason, clock=groups["clock"].strip())
+            seconds = parse_duration(groups.get("dur") or "")
+            if seconds is None:
+                return None
+            return QuickCommand(kind, None, None, kind, value=seconds, reason=reason)
         if kind == "temp":
             return QuickCommand("temp", room, groups.get("prep"), "temp", device="outside" if groups.get("outside") else None)
         if kind == "dim":
@@ -265,6 +287,43 @@ def targets(house: "House", area: "Area", command: QuickCommand) -> tuple[list["
     if command.room is None and len(chosen) > 1 and not controllers:
         return [], None
     return chosen, room_label
+
+
+def original_words(original: str, reason: str | None) -> str:
+    """The reason as the speaker said it, with capitals, e.g. 'da ist das Essen fertig'."""
+    if not reason:
+        return ""
+    words = re.findall(r"[\wäöüßÄÖÜ'-]+", original)
+    lower = [w.lower() for w in words]
+    wanted = reason.split()
+    for i in range(len(lower) - len(wanted) + 1):
+        if lower[i : i + len(wanted)] == wanted:
+            return " ".join(words[i : i + len(wanted)])
+    return reason
+
+
+_LABEL_SKIP = {"jarvis", "timer", "wecker", "stunde", "stunden", "minute", "minuten", "sekunden", "sir", "uhr", "erinnerung"}
+
+
+def timer_label(original: str, reason: str | None) -> str | None:
+    """A short name for the timer: the first noun of the reason ('Essen'), else its last word."""
+    said = original_words(original, reason)
+    if not said:
+        return None
+    words = said.split()
+    nouns = [w for w in words[1:] if w[:1].isupper() and w.lower() not in _LABEL_SKIP]
+    if nouns:
+        return nouns[0][:40]
+    rest = [w for w in words if w.lower() not in _REASON_WORDS | {"das", "die", "der", "den", "an", "ans", "daran", "dass", "zu", "zum", "zur"}]
+    return rest[-1][:40].capitalize() if rest else None
+
+
+def reminder_text(original: str, reason: str | None) -> str:
+    said = original_words(original, reason)
+    words = said.split()
+    while words and words[0].lower() in ("an", "ans", "daran", "zu"):
+        words = words[1:]
+    return " ".join(words)
 
 
 def _anrede_and_place(command: QuickCommand, room_label: str | None, lang: str) -> str:

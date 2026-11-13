@@ -331,6 +331,27 @@ class Brain:
                     contents[-1] = types.Content(role="model", parts=[types.Part.from_text(text=text)])
         return text, contents[-HISTORY_ITEMS:]
 
+    async def due_sentence(self, timer: dict, anrede: str | None) -> str:
+        """One spoken sentence for a due timer or reminder, in the configured personality."""
+        from google.genai import types
+
+        lang = "English" if timer.get("lang") == "en" else "Deutsch"
+        what = "Erinnerung" if timer.get("kind") == "reminder" else "Timer"
+        prompt = (
+            f"Ein {what} ist jetzt fällig. Name: {timer.get('label') or '-'}. "
+            f"Anlass in den Worten der Person: „{timer.get('text') or '-'}“. "
+            f"Sag das in genau einem kurzen, natürlichen Satz auf {lang}, in deinem Stil"
+            + (f", mit der Anrede „{anrede}“" if anrede else ", ohne Anrede")
+            + ". Nur der Satz, ohne Anführungszeichen."
+        )
+        config = types.GenerateContentConfig(
+            system_instruction=self.house.settings.get("gemini.system_prompt"),
+            thinking_config=self._thinking(),
+            max_output_tokens=120,
+        )
+        response = await self.generate([types.Content(role="user", parts=[types.Part.from_text(text=prompt)])], config)
+        return (response.text or "").strip().strip("„“\"")[:300]
+
     async def suggest(self, turn: Turn):
         """After an instant command: one fitting follow-up as an offer, or None. Never blocks the answer."""
         import json

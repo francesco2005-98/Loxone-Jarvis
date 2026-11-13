@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import logging
 import time
@@ -12,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..areas import Area
-from ..brain import confirm, fallback, quick
+from ..brain import confirm, fallback, quick, when
 from ..brain.gemini import BrainUnavailable
 from ..brain.tools import Pending, Turn
 from ..people import ENROLL_SENTENCES
@@ -471,6 +472,8 @@ class Coordinator:
             return quick.clock_reply(command, datetime.now(self.house.settings.tz), turn.lang, anrede, book)
         if command.kind == "temp":
             return quick.temperature_reply(self.house, turn.area, command, turn.lang, anrede, book)
+        if command.kind in ("timer", "reminder", "timer_left", "timer_cancel"):
+            return self._quick_timer(turn, command, anrede)
         entries, room = quick.targets(self.house, turn.area, command)
         if not entries:
             return None
@@ -484,6 +487,56 @@ class Coordinator:
                 log.exception("quick command failed")
                 ok = False
         return quick.reply(command, room, turn.lang, anrede, ok, book)
+
+    def _quick_timer(self, turn: Turn, command: quick.QuickCommand, anrede: str | None) -> str | None:
+        house = self.house
+        book = house.phrases
+        lang = turn.lang
+        timers = house.timers
+        area_id = turn.area.id
+        if command.kind == "timer_cancel":
+            count = timers.cancel(bereich_id=area_id)
+            return book.pick("timer_cancel" if count else "timer_none", lang, anrede=anrede)
+        if command.kind == "timer_left":
+            now = time.time()
+            running = timers.list(area_id)[:3]
+            if not running:
+                return book.pick("timer_none", lang, anrede=anrede)
+            parts = []
+            for timer in running:
+                seconds = max(1, int(timer["due_at"] - now))
+                if seconds > 120:
+                    seconds = int(math.ceil(seconds / 60) * 60)
+                left = when.human_duration(seconds, lang)
+                label = timer.get("label") or ""
+                generic = label.lower() in ("timer", "erinnerung", "reminder", "")
+                parts.append(left if generic else (f"{left} for {label}" if lang == "en" else f"{left} für {label}"))
+            return book.pick("timer_left", lang, anrede=anrede, wert=(" and " if lang == "en" else " und ").join(parts))
+        now_local = datetime.now(house.settings.tz)
+        if command.clock:
+            moment = when.parse_clock(command.clock, now_local)
+            if moment is None:
+                return None
+            due = moment.timestamp()
+            wert = f"at {when.human_clock(moment, lang)}" if lang == "en" else f"um {when.human_clock(moment, lang)}"
+        else:
+            due = time.time() + int(command.value or 0)
+            wert = when.human_duration(int(command.value or 0), lang)
+            if command.kind == "reminder":
+                wert = f"in {wert}"
+        label = quick.timer_label(turn.text, command.reason)
+        if command.kind == "timer":
+            text = quick.original_words(turn.text, command.reason)
+            label = label or "Timer"
+        else:
+            text = quick.reminder_text(turn.text, command.reason)
+            label = label or ("Reminder" if lang == "en" else "Erinnerung")
+        try:
+            timers.add(kind=command.kind, due_at=due, label=label, text=text, bereich_id=area_id, lang=lang, origin=turn.origin)
+        except ValueError:
+            return None
+        turn.done.append(f"{command.kind} {label}")
+        return book.pick("timer_set" if command.kind == "timer" else "reminder_set", lang, anrede=anrede, wert=wert)
 
     def _anrede(self, turn: Turn) -> str | None:
         anrede = self.house.people.address(turn.person_id)[0] if turn.person_id else None

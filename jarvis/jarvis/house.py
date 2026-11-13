@@ -25,7 +25,7 @@ from .loxone.structure import LoxControl
 from .mcp_client import ConfigMcp
 from .people import People
 from .security import Auth
-from .settings import Settings
+from .settings import ANREDE_LABELS, Settings
 from .timers import TimerService
 from .tls import Certificates
 from .brain.phrases import PhraseBook
@@ -38,6 +38,7 @@ from .voice.stt import Recognizer
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+DUE_TIMEOUT = 4.0
 FIRMWARE_DIR = STATIC_DIR / "firmware"
 
 
@@ -258,12 +259,7 @@ class House:
     # --------------------------------------------------------------- timers
     async def _timer_due(self, timer: dict) -> None:
         lang = timer.get("lang") or "de"
-        label = timer.get("label") or ""
-        if timer["kind"] == "reminder":
-            text = timer.get("text") or label
-            message = f"Erinnerung: {text}" if lang == "de" else f"Reminder: {text}"
-        else:
-            message = f"Der Timer {label} ist abgelaufen." if lang == "de" else f"Your {label} timer is done."
+        message = await self.due_message(timer)
         self.events.log("timer", message)
         if timer.get("origin") == "live":
             browsers = [s for s in self.live_sessions if s.area.id == timer.get("bereich_id")]
@@ -273,6 +269,25 @@ class House:
         area = self.areas.get(timer.get("bereich_id"))
         areas = [area] if area else [a for a in self.areas.list() if a.zone_uuid]
         await self.speech.say(message, lang, areas)
+
+    async def due_message(self, timer: dict) -> str:
+        """The sentence for a due timer or reminder: worded by Gemini in the personality, else from the phrase book."""
+        lang = timer.get("lang") or "de"
+        label = (timer.get("label") or "").strip()
+        text = (timer.get("text") or "").strip()
+        anrede = ANREDE_LABELS.get(self.settings.get("house.default_anrede"))
+        if self.secrets.has("gemini.api_key"):
+            try:
+                said = await asyncio.wait_for(self.brain.due_sentence(timer, anrede), timeout=DUE_TIMEOUT)
+                if said:
+                    return said
+            except Exception:  # noqa: BLE001
+                log.debug("due sentence from Gemini failed", exc_info=True)
+        if timer.get("kind") == "reminder":
+            return self.phrases.pick("reminder_due", lang, anrede=anrede, wert=text or label)
+        if label.lower() in ("", "timer"):
+            return self.phrases.pick("timer_due_plain", lang, anrede=anrede)
+        return self.phrases.pick("timer_due", lang, anrede=anrede, wert=label)
 
     # -------------------------------------------------------------- devices
     def device_url(self) -> str | None:
