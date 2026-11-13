@@ -259,7 +259,9 @@ function view(pitch, height) {
 }
 
 // Global tempo of the background motion; globe placement and level response stay unscaled.
-const TEMPO = 0.55;
+const TEMPO_REST = 0.3;
+const TEMPO_ACTIVE = 0.5;
+const IDLE_ENERGY = 0.15;
 
 // Energy per phase: enough to see that Jarvis is listening, thinking or speaking without turning hectic.
 const RESTING = { attention: 0.3, listening: 0.45, collecting: 0.45, followup: 0.32, thinking: 0.36, speaking: 0.5 };
@@ -448,7 +450,7 @@ export class Scene {
 
   setPhase(phase) {
     this.phase = phase;
-    this.energyTarget = RESTING[phase] ?? 0.22;
+    this.energyTarget = RESTING[phase] ?? IDLE_ENERGY;
     this.kick();
   }
 
@@ -475,14 +477,16 @@ export class Scene {
     const dt = Math.min(0.05, Math.max(0, raw));
     this.last = now;
     this.frame = requestAnimationFrame((t) => this.loop(t));
-    this.time += dt * TEMPO;
+    // At rest the scene drifts slowly; it only picks up pace while Jarvis listens, thinks or speaks.
+    const tempo = TEMPO_REST + this.energy * TEMPO_ACTIVE;
+    this.time += dt * tempo;
     const k = 1 - Math.exp(-dt * 2.6);
     for (const key of ["x", "y", "r", "alpha"]) this.globe[key] += (this.target[key] - this.globe[key]) * k;
     this.energy += (this.energyTarget - this.energy) * (1 - Math.exp(-dt * 2.5));
-    const resting = RESTING[this.phase] ?? 0.22;
+    const resting = RESTING[this.phase] ?? IDLE_ENERGY;
     this.energyTarget += (resting - this.energyTarget) * (1 - Math.exp(-dt * 1.5));
-    this.rot += dt * TEMPO * (0.28 + this.energy * 0.22);
-    this.pulse += dt * TEMPO * (0.16 + this.energy * 0.12);
+    this.rot += dt * tempo * (0.24 + this.energy * 0.22);
+    this.pulse += dt * tempo * (0.14 + this.energy * 0.12);
     this.adapt(raw);
     if (this.mode === "gl") this.draw();
     else this.draw2d();
