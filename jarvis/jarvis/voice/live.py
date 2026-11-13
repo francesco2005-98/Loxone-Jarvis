@@ -239,6 +239,14 @@ class LiveSession:
             return None, 0.0
         return base64.b64encode(wav.encode(rendered)).decode("ascii"), rendered.duration
 
+    async def _wait_played(self, audio: str | None, duration: float) -> None:
+        if not audio:
+            return
+        try:
+            await asyncio.wait_for(self._played.wait(), timeout=duration + 4.0)
+        except asyncio.TimeoutError:
+            pass
+
     async def announce(self, text: str, lang: str) -> None:
         """A timer or reminder set from this browser rings here."""
         audio, _ = await self._render(text, lang)
@@ -327,15 +335,19 @@ class LiveSession:
         self._played.clear()
         await self._state("speaking")
         await self.send({"type": "reply", "text": reply, "actions": done, "audio": audio})
-        if audio:
-            try:
-                await asyncio.wait_for(self._played.wait(), timeout=duration + 4.0)
-            except asyncio.TimeoutError:
-                pass
+        await self._wait_played(audio, duration)
+        offer = await coordinator.take_suggestion(self.session)
+        if offer is not None:
+            audio, duration = await self._render(offer.question, lang)
+            self._played.clear()
+            await self.send({"type": "reply", "text": offer.question, "actions": [], "audio": audio})
+            await self._wait_played(audio, duration)
         self.segmenter.reset()
         while not self.queue.empty():
             self.queue.get_nowait()
         seconds = float(self.house.settings.get("voice.followup_s"))
+        if self.session.pending is not None:
+            seconds = max(seconds, 6.0)
         if seconds > 0:
             await self._state("followup", time.monotonic() + seconds)
         else:

@@ -22,6 +22,7 @@ RULES = """REGELN (nicht verhandelbar)
 - Bei control, music, timer (set), announce, remember und rename schreibst du die gesprochene Bestätigung gleich in reply. Klappt alles, wird genau dieser Satz gesprochen und es gibt keine zweite Runde.
 - Musikwünsche wie „spiel etwas Jazz im Wohnzimmer“ gehen an music mit action search, value nur dem Suchbegriff (Jazz) und areas dem genannten Bereich. Das startet eine Spotify-Playlist über den Audioserver. Steht der Wunsch wörtlich in den Musik-Favoriten, nimm action favorite.
 - „Radio“, „Lautsprecher“ oder „Musik“ in einem Raum meint die Audio-Zone dort (music mit areas = Raum oder Zonenname, action play). Prüfe die Liste der Audio-Zonen, bevor du sagst, dass es keine gibt.
+- Vorschläge: Liegt nach einer Aktion eine Folgeaktion klar auf der Hand, gib sie als offer mit genau einer kurzen Frage mit, zum Beispiel abends Licht an und die Rollos im selben Raum sind noch offen, oder Fernsehlicht an und das helle Deckenlicht brennt noch. Nur freigegebene Geräte, nie bei Fragen nach Informationen, nie mehr als eine Frage, nie etwas aus KÜRZLICH ABGELEHNT. Wie oft, steht unter VORSCHLÄGE.
 - Antworte in der Sprache, in der du angesprochen wurdest."""
 
 
@@ -49,6 +50,8 @@ def build_system(
     zones: list[str] | None = None,
     default_anrede: str | None = None,
     states: list[str] | None = None,
+    suggestions: str = "reserved",
+    declined: list[str] | None = None,
 ) -> str:
     """Stable parts first, changing parts last: Gemini reuses the cached prefix and answers faster."""
     parts = [persona.strip(), "", RULES, ""]
@@ -95,6 +98,15 @@ def build_system(
         )
     if favorites:
         parts.append("MUSIK-FAVORITEN HIER: " + ", ".join(favorites))
+    parts.append(
+        "VORSCHLÄGE: "
+        + {
+            "off": "aus. Keine offer, keine Gegenfragen zu Folgeaktionen.",
+            "active": "aktiv. Biete eine Folgeaktion an, wann immer sie sinnvoll naheliegt.",
+        }.get(suggestions, "zurückhaltend. Nur wenn es sehr naheliegt, höchstens bei jeder dritten Aktion.")
+    )
+    if declined:
+        parts.append("KÜRZLICH ABGELEHNT (nicht erneut vorschlagen): " + ", ".join(declined))
     if states:
         parts.append("AKTUELLE ZUSTÄNDE (Kennung: Zustand):")
         parts.extend(states)

@@ -77,6 +77,15 @@ export default function ai(view, ctx) {
   };
   const endSilence = slider(300, 1500, 50, (v) => `${v} ms`);
   const followup = slider(0, 20, 1, (v) => (v === 0 ? "aus" : `${v} s`));
+  const declineHours = slider(0, 24, 1, (v) => (v === 0 ? "nicht merken" : `${v} h`));
+  const suggestions = selectEl(
+    [
+      { value: "reserved", label: "Zurückhaltend · nur wenn es klar passt" },
+      { value: "active", label: "Aktiv · bietet öfter etwas an" },
+      { value: "off", label: "Aus · keine Gegenfragen" },
+    ],
+    "reserved",
+  );
   const speculative = toggle(false, () => {});
   const quickToggle = toggle(false, () => {});
   const earlyWake = toggle(false, () => {});
@@ -103,8 +112,10 @@ export default function ai(view, ctx) {
       ...row("Satzende nach", endSilence.row, "So lange Stille gilt als Satzende. Kürzer antwortet schneller, länger lässt Zeit für kurze Denkpausen im Satz."),
       ...row("Vorab-Erkennung", speculative, "Startet die Spracherkennung schon in der ersten kurzen Pause. Spart rund 0,3 s."),
       ...row("Nachfrage-Fenster", followup.row, "So lange hört Jarvis nach einer Antwort ohne erneutes „Jarvis“ zu."),
-      ...row("Sofortantworten", quickToggle, "Licht, Dimmen, Rollos, Uhrzeit und Datum ohne Gemini, in Jarvis' Persönlichkeit."),
+      ...row("Sofortantworten", quickToggle, "Licht, Lichtkreise, Stimmungen, Dimmen, Rollos, Uhrzeit und Datum ohne Gemini, in Jarvis' Persönlichkeit."),
       ...row("Nachdenken von Gemini", thinking, "Weniger Nachdenken antwortet schneller, mehr hilft bei komplexen Fragen."),
+      ...row("Vorschläge & Gegenfragen", suggestions, "Jarvis bietet passende Folgeaktionen an, etwa abends die Rollos zu den Lichtern. Ein einfaches „Ja“ genügt, ausgeführt wird sofort und lokal."),
+      ...row("Abgelehnte Vorschläge merken", declineHours.row, "So lange schlägt Jarvis nach einem „Nein“ dasselbe nicht erneut vor."),
       ...row("Live: früh hinhören", earlyWake, "Erkennt „Jarvis“ schon während du sprichst und zeigt sofort, dass er zuhört."),
     ),
     h("hr", { class: "sep" }),
@@ -144,6 +155,8 @@ export default function ai(view, ctx) {
               "voice.end_silence_ms": Number(endSilence.input.value),
               "voice.followup_s": Number(followup.input.value),
               "brain.thinking": thinking.value,
+              "brain.suggestions": suggestions.value,
+              "brain.decline_hours": Number(declineHours.input.value),
               "voice.speculative": speculative.querySelector("input").checked,
               "brain.quick": quickToggle.querySelector("input").checked,
               "live.early_wake": earlyWake.querySelector("input").checked,
@@ -249,6 +262,9 @@ export default function ai(view, ctx) {
       followup.input.value = v["voice.followup_s"];
       followup.update();
       thinking.value = v["brain.thinking"];
+      suggestions.value = v["brain.suggestions"];
+      declineHours.input.value = v["brain.decline_hours"];
+      declineHours.update();
       speculative.querySelector("input").checked = v["voice.speculative"];
       quickToggle.querySelector("input").checked = v["brain.quick"];
       earlyWake.querySelector("input").checked = v["live.early_wake"];

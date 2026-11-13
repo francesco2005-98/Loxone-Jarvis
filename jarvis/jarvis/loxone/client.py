@@ -44,6 +44,7 @@ class MiniserverClient:
         self.values: dict[str, float] = {}
         self.texts: dict[str, str] = {}
         self.structure = Structure()
+        self.raw_structure: dict | None = None
         self.last_sync: float | None = None
         self.token_rights = 0
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -249,6 +250,7 @@ class MiniserverClient:
     async def _load_structure(self) -> None:
         text = await self._request("data/LoxAPP3.json", timeout=90.0)
         data = json.loads(text)
+        self.raw_structure = data
         self.structure = parse(data)
         self.catalog.sync(self.structure)
         self.last_sync = time.time()

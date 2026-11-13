@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ..areas import Area
-from ..loxone.catalog import ALL_ACTIONS, ActionError, Entry
+from ..loxone.catalog import ACTIONS, ALL_ACTIONS, ActionError, Entry
 
 if TYPE_CHECKING:
     from ..house import House
@@ -36,6 +36,7 @@ class Turn:
     person_id: str | None = None
     origin: str = ""
     pending: Pending | None = None
+    offer: Pending | None = None
     final_text: str | None = None
     done: list[str] = field(default_factory=list)
     started: float = field(default_factory=time.monotonic)
@@ -151,6 +152,28 @@ DECLARATIONS: list[dict] = [
     },
 ]
 
+_OFFER_ACTION = _schema(
+    {
+        "device": {"type": "string", "description": "Kennung aus der Geräteliste"},
+        "action": {"type": "string", "enum": ALL_ACTIONS},
+        "value": {"type": "string"},
+        "value2": {"type": "number"},
+    },
+    ["device", "action"],
+)
+OFFER_PROPERTY = {
+    "type": "object",
+    "description": (
+        "Optionaler Vorschlag für eine naheliegende Folgeaktion. Wird erst nach einem Ja ausgeführt. "
+        "question ist genau eine kurze Frage im Jarvis-Stil."
+    ),
+    "properties": {
+        "question": {"type": "string", "description": "z. B. Soll ich außerdem die Beschattung im Wohnzimmer herunterfahren?"},
+        "actions": {"type": "array", "items": _OFFER_ACTION},
+    },
+    "required": ["question", "actions"],
+}
+
 # Action tools carry the spoken confirmation, so a fully successful call needs no second model turn.
 QUICK_TOOLS = ("control", "music", "announce", "timer", "remember", "rename")
 REPLY_PROPERTY = {
@@ -160,6 +183,8 @@ REPLY_PROPERTY = {
 for _declaration in DECLARATIONS:
     if _declaration["name"] in QUICK_TOOLS:
         _declaration["parameters_json_schema"]["properties"]["reply"] = REPLY_PROPERTY
+    if _declaration["name"] in ("control", "music"):
+        _declaration["parameters_json_schema"]["properties"]["offer"] = OFFER_PROPERTY
 
 
 def settled(name: str, args: dict, result: dict) -> bool:
@@ -195,7 +220,10 @@ class ToolRunner:
         if handler is None:
             return {"error": f"unbekanntes Werkzeug {name}"}
         try:
-            return await handler(args or {}, turn)
+            result = await handler(args or {}, turn)
+            if args and args.get("offer") and settled(name, args, result):
+                turn.offer = self.offer(args["offer"], turn)
+            return result
         except ActionError as exc:
             return {"error": str(exc)}
         except Exception as exc:  # noqa: BLE001
@@ -229,6 +257,27 @@ class ToolRunner:
                 }
             )
         return {"results": results}
+
+    def offer(self, raw: Any, turn: Turn) -> Pending | None:
+        """A suggested follow-up the speaker can accept with a plain yes. Only allowed, non-critical devices."""
+        house = self.house
+        if house.settings.get("brain.suggestions") == "off" or not isinstance(raw, dict):
+            return None
+        question = str(raw.get("question") or "").strip()
+        actions: list[tuple[Entry, str, Any, Any]] = []
+        for item in raw.get("actions") or []:
+            if not isinstance(item, dict):
+                continue
+            entry = house.catalog.get(str(item.get("device", "")).strip().upper())
+            action = str(item.get("action", "")).strip()
+            if entry is None or not entry.allowed or entry.critical or action not in ACTIONS.get(entry.type, ()):
+                continue
+            if house.coordinator.declined(turn.area.id, entry.uuid, action):
+                continue
+            actions.append((entry, action, item.get("value"), item.get("value2")))
+        if not question or not actions:
+            return None
+        return Pending("offer", question, actions, lang=turn.lang)
 
     async def execute(self, entry: Entry, action: str, value: Any, value2: Any, turn: Turn | None) -> dict:
         house = self.house

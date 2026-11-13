@@ -26,6 +26,12 @@ REQUEST_TIMEOUT_MS = 25000
 # A warm HTTPS connection saves DNS and the TLS handshake on every sentence after a pause.
 WARM_SECONDS = 45
 KEEPALIVE_SECONDS = 300
+SUGGEST_TIMEOUT = 2.5
+SUGGEST_ASK = (
+    "Gerade sofort ausgeführt: {done}. Gibt es im Sinne von VORSCHLÄGE eine naheliegende Folgeaktion? "
+    "Antworte nur mit JSON: {{\"offer\": null}} oder "
+    "{{\"offer\": {{\"question\": \"eine kurze Frage in deinem Stil\", \"actions\": [{{\"device\": \"Kennung\", \"action\": \"Aktion\"}}]}}}}."
+)
 
 
 class BrainUnavailable(RuntimeError):
@@ -203,6 +209,11 @@ class Brain:
         entries = house.catalog.entries(only_allowed=True)
         devices = []
         states = []
+        by_uuid = {e.uuid: e for e in entries}
+        children: dict[str, list] = {}
+        for entry in entries:
+            if entry.parent:
+                children.setdefault(entry.parent, []).append(entry)
         for entry in entries:
             state = house.catalog.describe_state(entry, house.miniserver.state)
             extra = house.catalog.extras(entry, house.miniserver.state)
@@ -210,16 +221,25 @@ class Brain:
                 entry.group, "Gerät"
             )
             flag = " (Bestätigung nötig)" if entry.critical else ""
+            kind = {"direct": " [direkt]", "indirect": " [indirekt]"}.get(entry.kind, "")
+            hints = [extra] if extra else []
+            if entry.parent and entry.parent in by_uuid:
+                hints.append(f"Lichtkreis von {by_uuid[entry.parent].short_id}")
+            circuits = children.get(entry.uuid, [])
+            if circuits:
+                hints.append("Kreise: " + ", ".join(
+                    f"{c.short_id} {c.name}" + {"direct": " [direkt]", "indirect": " [indirekt]"}.get(c.kind, "") for c in circuits
+                ))
             devices.append(
                 " | ".join(
                     [
                         entry.short_id,
                         entry.name,
                         entry.room or "-",
-                        f"{label}/{entry.type}{flag}",
+                        f"{label}/{entry.type}{kind}{flag}",
                         ", ".join(entry.aliases) or "-",
                         ",".join(ACTIONS.get(entry.type, ())),
-                        extra or "-",
+                        "; ".join(hints) or "-",
                     ]
                 )
             )
@@ -243,6 +263,8 @@ class Brain:
             location=self.location_line(),
             default_anrede=ANREDE_LABELS.get(house.settings.get("house.default_anrede")),
             states=states,
+            suggestions=house.settings.get("brain.suggestions"),
+            declined=house.coordinator.declined_labels(area.id),
             zones=[f"{z.name} (Raum {z.room})" if z.room and z.room != z.name else z.name for z in house.miniserver.structure.zones()],
         )
 
@@ -298,7 +320,39 @@ class Brain:
                 break
         if not text:
             text = "Erledigt." if turn.done else ("Das habe ich nicht verstanden." if turn.lang == "de" else "I didn't catch that.")
+        if turn.offer is not None and turn.pending is None:
+            question = turn.offer.question
+            if _norm(question) not in _norm(text):
+                text = f"{text.rstrip()} {question}"
+                if contents and getattr(contents[-1], "role", "") == "model":
+                    contents[-1] = types.Content(role="model", parts=[types.Part.from_text(text=text)])
         return text, contents[-HISTORY_ITEMS:]
+
+    async def suggest(self, turn: Turn):
+        """After an instant command: one fitting follow-up as an offer, or None. Never blocks the answer."""
+        import json
+
+        from google.genai import types
+
+        if self.house.settings.get("brain.suggestions") == "off" or not turn.done:
+            return None
+        config = types.GenerateContentConfig(
+            system_instruction=self.system_for(turn, False),
+            response_mime_type="application/json",
+            thinking_config=self._thinking(),
+            max_output_tokens=300,
+        )
+        prompt = SUGGEST_ASK.format(done="; ".join(turn.done))
+        try:
+            response = await asyncio.wait_for(
+                self.generate([types.Content(role="user", parts=[types.Part.from_text(text=prompt)])], config),
+                timeout=SUGGEST_TIMEOUT,
+            )
+            data = json.loads(response.text or "{}")
+        except Exception:  # noqa: BLE001
+            log.debug("no suggestion", exc_info=True)
+            return None
+        return self.runner.offer(data.get("offer") if isinstance(data, dict) else None, turn)
 
     async def search(self, query: str, turn: Turn) -> str:
         from google.genai import types
@@ -332,3 +386,7 @@ def _spoken(calls: list, candidate: Any) -> str:
         return " ".join(replies)
     parts = getattr(candidate.content, "parts", None) or []
     return " ".join(p.text.strip() for p in parts if getattr(p, "text", None) and not getattr(p, "thought", False)).strip()
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9äöüß]+", " ", (text or "").lower()).strip()

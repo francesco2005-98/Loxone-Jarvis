@@ -57,6 +57,18 @@ class SecretBody(BaseModel):
     value: str = Field(default="", max_length=500)
 
 
+_PRIVATE_KEYS = {"currentuser", "user", "username", "password", "token", "remoteurl", "localurl", "serialnr", "macaddress", "ip"}
+
+
+def sanitize_structure(data: Any) -> Any:
+    """LoxAPP3 without user, address and token fields, for support."""
+    if isinstance(data, dict):
+        return {k: sanitize_structure(v) for k, v in data.items() if str(k).lower() not in _PRIVATE_KEYS}
+    if isinstance(data, list):
+        return [sanitize_structure(v) for v in data]
+    return data
+
+
 class LocationQuery(BaseModel):
     query: str = Field(min_length=2, max_length=200)
 
@@ -109,6 +121,7 @@ class ControlBody(BaseModel):
     allowed: bool | None = None
     critical: bool | None = None
     aliases: list[str] | None = None
+    light_kind: str | None = None
 
 
 class BulkBody(BaseModel):
@@ -575,6 +588,17 @@ def build_router(house: House) -> APIRouter:
             "mcp": {"url": house.settings.get("mcp.url"), "error": mcp.last_error},
             "last": house.coordinator.last,
         }
+
+    @router.get("/loxone/structure", dependencies=auth)
+    async def loxone_structure() -> Response:
+        raw = house.miniserver.raw_structure
+        if raw is None:
+            raise HTTPException(404, "Noch keine Struktur vom Miniserver geladen")
+        return Response(
+            json.dumps(sanitize_structure(raw), ensure_ascii=False, indent=1),
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="jarvis-loxone-struktur.json"'},
+        )
 
     @router.post("/loxone/reconnect", dependencies=auth)
     async def loxone_reconnect() -> dict:

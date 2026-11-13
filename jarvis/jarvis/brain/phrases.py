@@ -25,10 +25,13 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-INTENTS = ("light_on", "light_off", "dim", "shade_up", "shade_down", "time", "date", "failed", "offline")
+INTENTS = (
+    "light_on", "light_off", "dim", "scene", "shade_up", "shade_down", "time", "date", "failed", "offline",
+    "offer_done", "offer_declined",
+)
 REQUIRED = {
     "light_on": "{raum}", "light_off": "{raum}", "shade_up": "{raum}", "shade_down": "{raum}",
-    "dim": "{wert}", "time": "{uhrzeit}", "date": "{datum}",
+    "dim": "{wert}", "scene": "{wert}", "time": "{uhrzeit}", "date": "{datum}",
 }
 PLACEHOLDERS = ("{raum}", "{, anrede}", "{wert}", "{uhrzeit}", "{datum}")
 MIN_VARIANTS = 2
@@ -51,6 +54,11 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
             "Licht {raum} auf {wert} Prozent{, anrede}.",
             "Sehr wohl{, anrede}. {wert} Prozent {raum}.",
             "Gedimmt auf {wert} Prozent {raum}{, anrede}.",
+        ],
+        "scene": [
+            "Stimmung {wert} {raum}{, anrede}.",
+            "Sehr wohl{, anrede}. {wert} {raum} ist aktiv.",
+            "Wie gewünscht{, anrede}, Stimmung {wert}.",
         ],
         "shade_up": [
             "Die Rollos {raum} fahren hoch{, anrede}.",
@@ -78,6 +86,17 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
         "offline": [
             "Verzeihung{, anrede}, Gemini ist gerade nicht erreichbar. Licht und Rollos gehen weiter.",
         ],
+        "offer_done": [
+            "Sehr wohl{, anrede}.",
+            "Erledigt{, anrede}.",
+            "Wie Sie wünschen{, anrede}.",
+            "Ist veranlasst{, anrede}.",
+        ],
+        "offer_declined": [
+            "Sehr wohl{, anrede}.",
+            "Wie Sie meinen{, anrede}.",
+            "Dann lasse ich es so{, anrede}.",
+        ],
     },
     "en": {
         "light_on": ["Very good{, anrede}. Lights {raum} are on.", "Lights {raum} on{, anrede}.", "Done{, anrede}. Let there be light {raum}."],
@@ -89,6 +108,9 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
         "date": ["Today is {datum}{, anrede}.", "It is {datum}{, anrede}."],
         "failed": ["My apologies{, anrede}, that did not work.", "I'm afraid that failed{, anrede}."],
         "offline": ["My apologies{, anrede}, Gemini is unreachable. Lights and blinds still work."],
+        "scene": ["Mood {wert} {raum}{, anrede}.", "Very good{, anrede}. {wert} is set."],
+        "offer_done": ["Very good{, anrede}.", "Done{, anrede}.", "As you wish{, anrede}."],
+        "offer_declined": ["Very well{, anrede}.", "As you wish{, anrede}.", "I'll leave it then{, anrede}."],
     },
 }
 
@@ -97,10 +119,12 @@ Jede Situation bekommt 6 abwechslungsreiche, kurze Sätze (höchstens 12 Wörter
 Platzhalter exakt so übernehmen:
 - {raum}: Ortsangabe wie "im Esszimmer" oder leer. Muss in light_on, light_off, shade_up, shade_down vorkommen.
 - {, anrede}: wird zu ", Sir" oder entfällt. Nur dort, wo eine Anrede mit Komma natürlich klingt.
-- {wert}: Prozentzahl, Pflicht in dim. {uhrzeit}: Uhrzeit, Pflicht in time. {datum}: Datum, Pflicht in date.
-Situationen: light_on (Licht an), light_off (Licht aus), dim (Licht gedimmt), shade_up (Rollos hoch),
-shade_down (Rollos runter), time (Uhrzeit nennen), date (Datum nennen), failed (Aktion fehlgeschlagen),
-offline (KI nicht erreichbar, Licht und Rollos funktionieren weiter).
+- {wert}: Prozentzahl in dim, Name der Stimmung in scene; dort Pflicht. {uhrzeit}: Uhrzeit, Pflicht in time. {datum}: Datum, Pflicht in date.
+Situationen: light_on (Licht an), light_off (Licht aus), dim (Licht gedimmt), scene (Lichtstimmung {wert} aktiv),
+shade_up (Rollos hoch), shade_down (Rollos runter), time (Uhrzeit nennen), date (Datum nennen),
+failed (Aktion fehlgeschlagen), offline (KI nicht erreichbar, Licht und Rollos funktionieren weiter),
+offer_done (dein eigener Vorschlag wurde nach einem Ja ausgeführt, sehr kurz),
+offer_declined (dein Vorschlag wurde abgelehnt, kurz und gelassen).
 Antworte nur mit JSON: {"de": {"light_on": [...], ...}, "en": {"light_on": [...], ...}}. "en" auf Englisch."""
 
 

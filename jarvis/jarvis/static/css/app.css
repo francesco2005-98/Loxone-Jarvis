@@ -314,6 +314,7 @@ a.btn { text-decoration: none; }
 .controls-table tr:hover td { background: rgba(242, 194, 27, 0.025); }
 .controls-table .id { font-family: var(--mono); color: var(--gold-dim); font-size: 0.82em; }
 .alias-input { width: 150px; padding: 4px 8px; font-size: 0.85em; }
+.kind-select { min-width: 160px; padding: 4px 30px 4px 8px; font-size: 0.85em; }
 
 /* ------------------------------------------------------- gate & modal */
 .gate { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 6vh 20px 7vh; transition: opacity 0.8s var(--ease); }

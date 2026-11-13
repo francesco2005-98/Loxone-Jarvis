@@ -62,6 +62,31 @@ GROUP_LABEL = {
 
 _LIGHT_WORDS = re.compile(r"licht|light|lampe|leuchte|beleuchtung|spot|led|strahler|lamp", re.I)
 _CRITICAL_WORDS = re.compile(r"schloss|lock|garage|\btor\b|garagentor|alarm", re.I)
+
+LIGHT_KINDS = ("auto", "direct", "indirect")
+_INDIRECT = re.compile(
+    r"indirekt|indirect|\bled\b|led[- ]?streifen|streifen|stripe?|ambient|ambiente|akzent|accent|sockel|voute|"
+    r"hinterleucht|backlight|schrank|nische|kontur|cove|deko",
+    re.I,
+)
+_DIRECT = re.compile(r"\bdirekt|direct|decke|ceiling|spot|pendel|pendant|haupt|main|einbau|downlight|strahler", re.I)
+
+
+def detect_light_kind(control: LoxControl | None, name: str, aliases: list[str]) -> str:
+    """Direct or indirect light from what Loxone holds for the block, then from its names."""
+    if control is not None:
+        for key, value in (control.details or {}).items():
+            text = f"{key} {value}" if isinstance(value, (str, int, float, bool)) else str(key)
+            if _INDIRECT.search(text) and not re.search(r"\bdirect\b", text, re.I):
+                return "indirect"
+            if re.search(r"\bdirect\b|\bdirekt\b", text, re.I):
+                return "direct"
+    words = " ".join([name, *aliases])
+    if _INDIRECT.search(words):
+        return "indirect"
+    if _DIRECT.search(words):
+        return "direct"
+    return "unknown"
 _DOOR_OPENER = re.compile(r"t(ü|ue)r\s*(ö|oe)ffn|door\s*open|summer|buzzer|t(ü|ue)r\s*auf", re.I)
 
 MOOD_OFF = 778
@@ -119,6 +144,8 @@ class Entry:
     critical: bool
     secured: bool
     aliases: list[str] = field(default_factory=list)
+    light_kind: str = "auto"
+    kind: str = "unknown"
 
     def public(self) -> dict:
         return {
@@ -134,6 +161,8 @@ class Entry:
             "aliases": self.aliases,
             "actions": list(ACTIONS.get(self.type, ())),
             "child": self.parent is not None,
+            "light_kind": self.light_kind,
+            "kind": self.kind,
         }
 
 
@@ -202,6 +231,11 @@ class Catalog:
     def _entry(self, row: dict) -> Entry:
         control = self.structure.controls.get(row["uuid"])
         group = group_of(control) if control else None
+        aliases = loads(row["aliases"], [])
+        override = row.get("light_kind") or "auto"
+        kind = "unknown"
+        if group == "light":
+            kind = override if override in ("direct", "indirect") else detect_light_kind(control, row["name"], aliases)
         return Entry(
             uuid=row["uuid"],
             short_id=row["short_id"],
@@ -214,7 +248,9 @@ class Catalog:
             allowed=bool(row["allowed"]),
             critical=bool(row["critical"]),
             secured=row["uuid"] in self._secured,
-            aliases=loads(row["aliases"], []),
+            aliases=aliases,
+            light_kind=override or "auto",
+            kind=kind,
         )
 
     def entries(self, only_allowed: bool = False) -> list[Entry]:
@@ -234,7 +270,15 @@ class Catalog:
         row = self._db.one("SELECT * FROM controls WHERE uuid = ?", (uuid,))
         return self._entry(row) if row else None
 
-    def update(self, short_id: str, *, allowed: bool | None = None, critical: bool | None = None, aliases: list[str] | None = None) -> Entry:
+    def update(
+        self,
+        short_id: str,
+        *,
+        allowed: bool | None = None,
+        critical: bool | None = None,
+        aliases: list[str] | None = None,
+        light_kind: str | None = None,
+    ) -> Entry:
         entry = self.get(short_id)
         if entry is None:
             raise KeyError(short_id)
@@ -253,7 +297,14 @@ class Catalog:
                 if alias and alias.lower() not in (a.lower() for a in clean) and len(alias) <= 60:
                     clean.append(alias)
             self._db.execute("UPDATE controls SET aliases=? WHERE uuid=?", (dumps(clean[:20]), entry.uuid))
+        if light_kind is not None:
+            if light_kind not in LIGHT_KINDS:
+                raise ActionError("Lichtart ist auto, direct oder indirect")
+            self._db.execute("UPDATE controls SET light_kind=? WHERE uuid=?", (light_kind, entry.uuid))
         return self.get(short_id)  # type: ignore[return-value]
+
+    def children(self, entry: Entry, only_allowed: bool = True) -> list[Entry]:
+        return [e for e in self.entries(only_allowed=only_allowed) if e.parent == entry.uuid]
 
     def add_alias(self, short_id: str, alias: str) -> Entry:
         entry = self.get(short_id)

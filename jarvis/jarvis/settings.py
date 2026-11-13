@@ -143,6 +143,8 @@ FIELDS: dict[str, Field] = {
     "voice.followup_s": Field(8, _int(0, 20)),
     "brain.quick": Field(True, _bool),
     "brain.thinking": Field("auto", _choice("auto", "minimal", "low", "medium", "high")),
+    "brain.suggestions": Field("reserved", _choice("off", "reserved", "active")),
+    "brain.decline_hours": Field(3, _int(0, 24)),
     "live.early_wake": Field(True, _bool),
     "house.timezone": Field("Europe/Berlin", _timezone),
     "house.notes": Field("", _str(4000)),

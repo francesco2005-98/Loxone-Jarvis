@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 import time
 from datetime import datetime
@@ -27,6 +28,10 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 LEVEL_INTERVAL = 0.06
+SUGGEST_WAIT = 1.2
+SUGGEST_COOLDOWN = {"reserved": 600.0, "active": 120.0}
+OFFER_YES = {"gerne", "klar", "sicher", "unbedingt", "bitte", "jo", "jep", "sure", "please", "yeah"}
+OFFER_FOLLOWUP_MIN = 6.0
 # Recognition starts on a short pause and is kept if the pause turns into the end of the sentence.
 SPECULATE_MS = 250
 
@@ -62,6 +67,8 @@ class Coordinator:
         self.enroll: dict[str, EnrollJob] = {}
         self.latencies: deque[int] = deque(maxlen=20)
         self.last: dict | None = None
+        self._declines: dict[str, list[tuple[float, str, str, str]]] = {}
+        self._suggested_at: dict[str, float] = {}
         self._level_at: dict[str, float] = {}
 
     # ------------------------------------------------------------ helpers
@@ -296,8 +303,13 @@ class Coordinator:
                 session.start_speaking()
                 await house.speech.say(reply, transcript.lang, [area])
                 self.last["timing"]["voice"] = house.speech.last_voice_ms
+                offer = await self.take_suggestion(session)
+                if offer is not None:
+                    await house.speech.say(offer.question, transcript.lang, [area])
             if session.phase in (Phase.SPEAKING, Phase.THINKING):
                 seconds = float(house.settings.get("voice.followup_s"))
+                if session.pending is not None:
+                    seconds = max(seconds, OFFER_FOLLOWUP_MIN)
                 session.open_followup(run.mic.id, seconds)
                 self._phase(area.id)
                 if session.phase == Phase.FOLLOWUP:
@@ -326,14 +338,24 @@ class Coordinator:
             pending: Pending = session.pending  # type: ignore[assignment]
             session.pending = None
             answer = confirm.classify(text)
-            if answer == confirm.Answer.YES:
+            if pending.kind == "offer" and answer == confirm.Answer.UNCLEAR:
+                answer = _offer_answer(text)
+            if pending.kind == "offer":
+                if answer != confirm.Answer.UNCLEAR:
+                    reply, done = await self._answer_offer(pending, area, lang, person_id, origin, answer)
+                    _remember(session, text, reply)
+                    return reply, done
+            elif answer == confirm.Answer.YES:
                 return await self._confirmed(pending, session, area, lang, person_id, origin)
-            if answer == confirm.Answer.NO:
+            elif answer == confirm.Answer.NO:
                 return ("Abgebrochen." if lang == "de" else "Cancelled."), []
+        session.suggestion = None
         turn = Turn(area=area, lang=lang, text=text, person_id=person_id, origin=origin)
         instant = await self._quick(turn)
         if instant is not None:
             _remember(session, text, instant)
+            if turn.done and self._may_suggest(area):
+                session.suggestion = asyncio.ensure_future(self.house.brain.suggest(turn))
             return instant, turn.done
         try:
             reply, history = await self.house.brain.answer(turn, session.history)
@@ -343,7 +365,75 @@ class Coordinator:
             reply = await self._fallback(turn)
         if turn.pending is not None:
             session.pending = turn.pending
+        elif turn.offer is not None:
+            session.pending = turn.offer
         return reply, turn.done
+
+    # --------------------------------------------------------- suggestions
+    async def _answer_offer(
+        self, offer: Pending, area: Area, lang: str, person_id: str | None, origin: str, answer: confirm.Answer
+    ) -> tuple[str, list[str]]:
+        """A plain yes or no to Jarvis' own suggestion, decided locally without Gemini."""
+        turn = Turn(area=area, lang=lang, text="ja", person_id=person_id, origin=origin)
+        anrede = self._anrede(turn)
+        if answer == confirm.Answer.NO:
+            for entry, action, _, _ in offer.actions:
+                self._declines.setdefault(area.id, []).append((time.time(), entry.uuid, action, f"{entry.name}: {action}"))
+            return self.house.phrases.pick("offer_declined", lang, anrede=anrede), []
+        ok = True
+        for entry, action, value, value2 in offer.actions:
+            try:
+                result = await self.house.brain.runner.execute(entry, action, value, value2, turn)
+                ok = ok and bool(result.get("ok"))
+            except Exception:  # noqa: BLE001
+                log.exception("offer failed")
+                ok = False
+        return self.house.phrases.pick("offer_done" if ok else "failed", lang, anrede=anrede), turn.done
+
+    def _may_suggest(self, area: Area) -> bool:
+        """Background suggestions for instant commands: only with Gemini, other devices around and a pause since the last."""
+        house = self.house
+        level = house.settings.get("brain.suggestions")
+        if level == "off" or not house.secrets.has("gemini.api_key"):
+            return False
+        if time.monotonic() - self._suggested_at.get(area.id, -1e9) < SUGGEST_COOLDOWN.get(level, 600.0):
+            return False
+        if level == "reserved":
+            around = [e for e in house.catalog.entries(only_allowed=True) if e.room in area.rooms and not e.critical]
+            if len({e.group for e in around}) < 2 and len(around) < 2:
+                return False
+        self._suggested_at[area.id] = time.monotonic()
+        return True
+
+    async def take_suggestion(self, session: AreaSession, wait: float = SUGGEST_WAIT) -> Pending | None:
+        """The background suggestion, if it is ready by now (or within a short wait). Becomes the open question."""
+        task = session.suggestion
+        session.suggestion = None
+        if task is None:
+            return None
+        try:
+            offer = await asyncio.wait_for(asyncio.shield(task), timeout=wait)
+        except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+            task.cancel()
+            return None
+        if offer is not None and session.pending is None:
+            session.pending = offer
+            _remember_model(session, offer.question)
+            return offer
+        return None
+
+    def _recent_declines(self, area_id: str) -> list[tuple[float, str, str, str]]:
+        hours = float(self.house.settings.get("brain.decline_hours"))
+        cutoff = time.time() - hours * 3600
+        items = [d for d in self._declines.get(area_id, []) if d[0] >= cutoff]
+        self._declines[area_id] = items
+        return items
+
+    def declined(self, area_id: str, uuid: str, action: str) -> bool:
+        return any(d[1] == uuid and d[2] == action for d in self._recent_declines(area_id))
+
+    def declined_labels(self, area_id: str) -> list[str]:
+        return [d[3] for d in self._recent_declines(area_id)]
 
     async def _confirmed(
         self, pending: Pending, session: AreaSession, area: Area, lang: str, person_id: str | None, origin: str = ""
@@ -382,7 +472,7 @@ class Coordinator:
         entries, room = quick.targets(self.house, turn.area, command)
         if not entries:
             return None
-        value = str(command.value) if command.value is not None else None
+        value = command.scene or (str(command.value) if command.value is not None else None)
         ok = True
         for entry in entries:
             try:
@@ -510,3 +600,21 @@ def _remember(session: AreaSession, text: str, reply: str) -> None:
             types.Content(role="model", parts=[types.Part.from_text(text=reply)]),
         ]
     )[-12:]
+
+
+def _remember_model(session: AreaSession, text: str) -> None:
+    try:
+        from google.genai import types
+    except ImportError:
+        return
+    session.history = (list(session.history) + [types.Content(role="model", parts=[types.Part.from_text(text=text)])])[-12:]
+
+
+def _offer_answer(text: str) -> confirm.Answer:
+    """Friendly yes or no words that are fine for a suggestion, though not for the alarm."""
+    words = re.findall(r"[a-zäöüß]+", text.lower())
+    if words and words[0] in OFFER_YES and len(words) <= 4:
+        return confirm.Answer.YES
+    if words and words[0] in ("nö", "nee", "lass", "lieber") and len(words) <= 4:
+        return confirm.Answer.NO
+    return confirm.Answer.UNCLEAR

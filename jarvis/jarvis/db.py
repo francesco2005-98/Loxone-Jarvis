@@ -97,6 +97,10 @@ SCHEMA = [
     """
     ALTER TABLE timers ADD COLUMN origin TEXT NOT NULL DEFAULT '';
     """,
+    # version 3: direct or indirect light, set by hand where the name does not tell
+    """
+    ALTER TABLE controls ADD COLUMN light_kind TEXT NOT NULL DEFAULT 'auto';
+    """,
 ]
 
 

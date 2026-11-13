@@ -1,4 +1,4 @@
-import { busy, card, clear, countUp, h, pageHead, pill, svg, timeAgo, toast, toggle } from "../dom.js";
+import { busy, card, clear, countUp, h, pageHead, pill, selectEl, svg, timeAgo, toast, toggle } from "../dom.js";
 
 const GROUPS = [
   { id: "light", label: "Licht", unit: "Kreise", count: (c) => c.light },
@@ -71,10 +71,11 @@ export default function loxonePage(view, ctx) {
   const devicesTitle = h("span", {}, "Bausteine");
   const bulkOn = h("button", { class: "btn small", type: "button" }, "Alle freigeben");
   const bulkOff = h("button", { class: "btn small", type: "button" }, "Alle sperren");
+  const structureLink = h("a", { class: "btn small", href: "/api/loxone/structure", download: "jarvis-loxone-struktur.json" }, "Struktur herunterladen");
   const devicesCard = h(
     "section",
     { class: "card", style: { "margin-top": "clamp(14px, 1.2vw, 24px)" } },
-    h("div", { class: "card-title" }, devicesTitle, h("span", { class: "row" }, bulkOn, bulkOff)),
+    h("div", { class: "card-title" }, devicesTitle, h("span", { class: "row" }, bulkOn, bulkOff, structureLink)),
     h("p", { class: "hint" }, "Nur freigegebene Bausteine sieht Gemini, und nur diese schaltet Jarvis. Sprechweisen sind weitere Namen, z. B. „indirekte Beleuchtung am Fernseher“. Tore, Alarm und Schlösser verlangen ein gesprochenes Ja."),
     devicesBox,
   );
@@ -203,6 +204,20 @@ export default function loxonePage(view, ctx) {
     devicesCard.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function lightKind(c, labels) {
+    const select = selectEl(
+      [
+        { value: "auto", label: `Automatisch (${labels[c.kind] || "offen"})` },
+        { value: "direct", label: "Direkt" },
+        { value: "indirect", label: "Indirekt" },
+      ],
+      c.light_kind || "auto",
+      { class: "select kind-select" },
+    );
+    select.addEventListener("change", () => saveControl(c, { light_kind: select.value }).then(renderDevices));
+    return select;
+  }
+
   function renderDevices() {
     clear(devicesBox);
     const label = [...GROUPS, ...EXTRA].find((g) => g.id === selected);
@@ -214,7 +229,8 @@ export default function loxonePage(view, ctx) {
       return;
     }
     const table = h("table", { class: "controls-table" });
-    table.append(h("thead", {}, h("tr", {}, ["Kennung", "Name", "Raum", "Art", "Zustand", "Freigabe", "Ja nötig", "Sprechweisen"].map((t) => h("th", {}, t)))));
+    table.append(h("thead", {}, h("tr", {}, ["Kennung", "Name", "Raum", "Art", "Lichtart", "Zustand", "Freigabe", "Ja nötig", "Sprechweisen"].map((t) => h("th", {}, t)))));
+    const KIND_LABEL = { direct: "direkt", indirect: "indirekt", unknown: "offen" };
     const body = h("tbody");
     for (const c of list) {
       const aliases = h("div", { class: "chips" });
@@ -238,6 +254,7 @@ export default function loxonePage(view, ctx) {
           h("td", {}, c.child ? h("span", { class: "muted" }, "↳ ") : null, c.name),
           h("td", { class: "muted" }, c.room || "–"),
           h("td", { class: "muted small" }, c.type),
+          h("td", {}, c.group === "light" ? lightKind(c, KIND_LABEL) : h("span", { class: "muted" }, "–")),
           h("td", { class: "small" }, c.state || "–"),
           h("td", {}, c.secured ? h("span", { class: "hint" }, "Visu-Passwort") : toggle(c.allowed, (v) => saveControl(c, { allowed: v }), { label: "Freigabe" })),
           h("td", {}, toggle(c.critical, (v) => saveControl(c, { critical: v }), { label: "Bestätigung", disabled: c.group === "gate" || c.group === "alarm" })),

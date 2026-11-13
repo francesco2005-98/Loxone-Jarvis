@@ -70,6 +70,7 @@ class AreaSession:
     followup_mic: str | None = None
     history: list = field(default_factory=list)
     pending: object | None = None
+    suggestion: object | None = None
 
     def offer(self, mic_id: str, wake_word: bool) -> Offer:
         """A board in this Bereich wants to start a run."""
