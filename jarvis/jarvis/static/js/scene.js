@@ -22,7 +22,7 @@ void main() {
   vec3 p = vec3(c * aPos.x + s * aPos.z, aPos.y, -s * aPos.x + c * aPos.z);
   float ct = cos(uTilt), st = sin(uTilt);
   p = vec3(p.x, ct * p.y - st * p.z, st * p.y + ct * p.z);
-  float breathe = 1.0 + uEnergy * 0.035 * sin(uTime * 9.0 + aSeed * 6.28);
+  float breathe = 1.0 + uEnergy * 0.012 * sin(uTime * 4.0 + aSeed * 6.28);
   float persp = 1.0 / (1.0 - p.z * 0.28);
   vec2 px = uCenter + vec2(p.x, -p.y) * uRadius * persp * breathe;
   vec2 ndc = px / uRes * 2.0 - 1.0;
@@ -30,7 +30,7 @@ void main() {
   vFront = (p.z + 1.0) * 0.5;
   vSeed = aSeed;
   float scale = clamp(uRadius / 280.0, 0.7, 2.2);
-  gl_PointSize = (0.85 + 1.7 * vFront) * uDpr * scale * uPoint * (1.0 + uEnergy * 0.45);
+  gl_PointSize = (0.85 + 1.7 * vFront) * uDpr * scale * uPoint * (1.0 + uEnergy * 0.2);
 }`;
 
 const GLOBE_FS = `
@@ -261,7 +261,8 @@ function view(pitch, height) {
 // Global tempo of the background motion; globe placement and level response stay unscaled.
 const TEMPO = 0.55;
 
-const RESTING = { listening: 0.62, collecting: 0.62, followup: 0.4, thinking: 0.48, speaking: 0.9 };
+// Energy per phase: enough to see that Jarvis is listening, thinking or speaking without turning hectic.
+const RESTING = { attention: 0.3, listening: 0.45, collecting: 0.45, followup: 0.32, thinking: 0.36, speaking: 0.5 };
 
 const gold = (a) => `rgba(242, 194, 27, ${a})`;
 
@@ -282,16 +283,20 @@ export class Scene {
     this.gl = null;
     this.software = false;
     this.lite = false;
-    this.dprCap = 3;
+    this.dprCap = window.matchMedia("(pointer: coarse)").matches ? 2 : 3;
     this.avg = 1 / 60;
     this.frames = 0;
     if (!this.initGl()) this.init2d();
     if (!this.mode) return;
     this.resize();
-    window.addEventListener("resize", () => {
+    const refit = () => {
       this.resize();
       this.kick();
-    });
+    };
+    window.addEventListener("resize", refit);
+    window.addEventListener("orientationchange", refit);
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", refit);
+    if (window.ResizeObserver) new ResizeObserver(refit).observe(this.canvas);
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) this.stop();
       else this.kick();
@@ -366,7 +371,8 @@ export class Scene {
 
   setup() {
     const gl = this.gl;
-    const pixels = window.innerWidth * window.innerHeight * (window.devicePixelRatio || 1);
+    const { w: cssW, h: cssH } = this.size();
+    const pixels = cssW * cssH * (window.devicePixelRatio || 1);
     this.fine = !this.software && pixels > 900000;
     this.progGlobe = program(gl, GLOBE_VS, GLOBE_FS);
     this.progRing = program(gl, RING_VS, RING_FS);
@@ -410,11 +416,22 @@ export class Scene {
     this.initRings();
   }
 
+  // Drawn size of the canvas in CSS pixels. On phones 100vh is taller than the visible area,
+  // so the canvas measures itself instead of trusting the window.
+  size() {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      w: rect.width || window.innerWidth,
+      h: rect.height || window.innerHeight,
+    };
+  }
+
   resize() {
     if (!this.mode) return;
     this.dpr = Math.min(window.devicePixelRatio || 1, this.dprCap);
-    const w = Math.round(window.innerWidth * this.dpr);
-    const h = Math.round(window.innerHeight * this.dpr);
+    const { w: cssW, h: cssH } = this.size();
+    const w = Math.max(1, Math.round(cssW * this.dpr));
+    const h = Math.max(1, Math.round(cssH * this.dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
@@ -436,7 +453,7 @@ export class Scene {
   }
 
   level(value) {
-    this.energyTarget = Math.max(this.energyTarget, Math.min(1, value * 1.6));
+    this.energyTarget = Math.max(this.energyTarget, Math.min(0.7, value * 1.1));
     this.kick();
   }
 
@@ -461,11 +478,11 @@ export class Scene {
     this.time += dt * TEMPO;
     const k = 1 - Math.exp(-dt * 2.6);
     for (const key of ["x", "y", "r", "alpha"]) this.globe[key] += (this.target[key] - this.globe[key]) * k;
-    this.energy += (this.energyTarget - this.energy) * (1 - Math.exp(-dt * 4));
+    this.energy += (this.energyTarget - this.energy) * (1 - Math.exp(-dt * 2.5));
     const resting = RESTING[this.phase] ?? 0.22;
     this.energyTarget += (resting - this.energyTarget) * (1 - Math.exp(-dt * 1.5));
-    this.rot += dt * TEMPO * (0.28 + this.energy * 0.55);
-    this.pulse += dt * TEMPO * (0.16 + this.energy * 0.24);
+    this.rot += dt * TEMPO * (0.28 + this.energy * 0.22);
+    this.pulse += dt * TEMPO * (0.16 + this.energy * 0.12);
     this.adapt(raw);
     if (this.mode === "gl") this.draw();
     else this.draw2d();
@@ -505,7 +522,7 @@ export class Scene {
       gl.uniformMatrix4fv(pr.u.uMVP, false, new Float32Array(mvp));
       gl.uniform1f(pr.u.uScroll, (this.time * 0.7) % 2);
       gl.uniform1f(pr.u.uFar, this.gridFar);
-      gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.16 + this.energy * 0.08);
+      gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.16 + this.energy * 0.05);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.gridBuf);
       gl.enableVertexAttribArray(pr.a.aPos);
       gl.vertexAttribPointer(pr.a.aPos, 3, gl.FLOAT, false, 0, 0);
@@ -564,18 +581,18 @@ export class Scene {
         const fade = (1 - p) * (1 - p) * Math.min(1, p * 8);
         gl.uniform1f(pr.u.uRadius, R * (1.0 + p * 1.3));
         gl.uniform1f(pr.u.uWidth, (1.2 + p * 3) * dpr);
-        gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.45 * fade * g.alpha * (0.7 + this.energy));
+        gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], 0.45 * fade * g.alpha * (0.75 + this.energy * 0.5));
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.ringCount);
       }
       gl.uniform1f(pr.u.uFade, 1);
-      const speedUp = 1 + this.energy * 4.2;
+      const speedUp = 1 + this.energy * 1.6;
       for (const arc of this.arcs) {
         const start = arc.start + this.time * arc.speed * speedUp;
         gl.uniform1f(pr.u.uRadius, R * arc.r * breathe);
-        gl.uniform1f(pr.u.uWidth, arc.w * dpr * (1 + this.energy * 0.55));
+        gl.uniform1f(pr.u.uWidth, arc.w * dpr * (1 + this.energy * 0.3));
         gl.uniform1f(pr.u.uStart, start);
-        gl.uniform1f(pr.u.uLen, arc.len * (1 + this.energy * 0.3));
-        gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], arc.a * g.alpha * (0.75 + this.energy * 0.5));
+        gl.uniform1f(pr.u.uLen, arc.len * (1 + this.energy * 0.15));
+        gl.uniform4f(pr.u.uColor, GOLD[0], GOLD[1], GOLD[2], arc.a * g.alpha * (0.8 + this.energy * 0.35));
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.ringCount);
       }
       gl.disableVertexAttribArray(pr.a.aT);
@@ -704,16 +721,16 @@ export class Scene {
     for (let i = 0; i < 3; i++) {
       const p = (this.pulse + i / 3) % 1;
       const fade = (1 - p) * (1 - p) * Math.min(1, p * 8);
-      c.strokeStyle = gold(0.45 * fade * g.alpha * (0.7 + this.energy));
+      c.strokeStyle = gold(0.45 * fade * g.alpha * (0.75 + this.energy * 0.5));
       c.lineWidth = 1.2 + p * 3;
       circle(R * (1 + p * 1.3));
     }
-    const speedUp = 1 + this.energy * 4.2;
+    const speedUp = 1 + this.energy * 1.6;
     for (const arc of this.arcs) {
       const start = arc.start + this.time * arc.speed * speedUp;
-      c.strokeStyle = gold(arc.a * g.alpha * (0.75 + this.energy * 0.5));
-      c.lineWidth = arc.w * (1 + this.energy * 0.55);
-      circle(R * arc.r * breathe, start, start + arc.len * (1 + this.energy * 0.3));
+      c.strokeStyle = gold(arc.a * g.alpha * (0.8 + this.energy * 0.35));
+      c.lineWidth = arc.w * (1 + this.energy * 0.3);
+      circle(R * arc.r * breathe, start, start + arc.len * (1 + this.energy * 0.15));
     }
 
     c.strokeStyle = gold(0.34 * g.alpha);
@@ -749,7 +766,7 @@ export class Scene {
     for (let b = 0; b < 4; b++) {
       const front = (b + 0.5) / 4;
       const alpha = (0.16 + 0.84 * front * front) * g.alpha * (0.85 + this.energy * 0.4);
-      const s = (0.85 + 1.7 * front) * scale * (1 + this.energy * 0.45) * 1.2;
+      const s = (0.85 + 1.7 * front) * scale * (1 + this.energy * 0.2) * 1.2;
       c.fillStyle = gold(Math.min(1, alpha));
       const list = buckets[b];
       for (let i = 0; i < list.length; i += 2) c.fillRect(list[i] - s / 2, list[i + 1] - s / 2, s, s);

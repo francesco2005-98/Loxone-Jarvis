@@ -27,6 +27,7 @@ from .people import People
 from .security import Auth
 from .settings import Settings
 from .timers import TimerService
+from .tls import Certificates
 from .usage import Usage
 from .voice.coordinator import Coordinator
 from .voice.mics import MicManager
@@ -67,6 +68,7 @@ class House:
         self._tasks: set[asyncio.Task] = set()
         self._favorites: dict[int, tuple[float, list[dict]]] = {}
         self.live_sessions: set = set()
+        self.certs = Certificates(config.data_dir / "tls")
         self.started_at = time.time()
         self.settings.on_change(self._settings_changed)
 
@@ -81,6 +83,7 @@ class House:
         self.background(self._housekeeping(), "housekeeping")
         self.background(asyncio.to_thread(self.stt.preload, self.settings.get("stt.model")), "stt-preload")
         self.background(self._warm_voices(), "voice-warmup")
+        self.background(asyncio.to_thread(self.stt.preload, "base"), "stt-preload-base")
 
     async def _warm_voices(self, attempts: int = 10) -> None:
         """Piper loads a voice on first use; doing that now keeps it out of the first answer."""
