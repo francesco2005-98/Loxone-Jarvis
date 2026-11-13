@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..loxone.catalog import ACTIONS
 from .prompt import SpeakerInfo, build_system
-from .tools import ToolRunner, Turn
+from .tools import ToolRunner, Turn, settled
 
 if TYPE_CHECKING:
     from ..house import House
@@ -57,12 +57,13 @@ class Brain:
         return self.house.settings.get("gemini.model")
 
     def _thinking(self):
-        """Thinking level exists from Gemini 3 on; older models keep their default."""
+        """Thinking level exists from Gemini 3 on; Flash can go down to minimal, which keeps voice turns fast."""
         from google.genai import types
 
         match = re.match(r"gemini-(\d+)", self.model)
         if match and int(match.group(1)) >= 3:
-            return types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+            level = types.ThinkingLevel.MINIMAL if "flash" in self.model else types.ThinkingLevel.LOW
+            return types.ThinkingConfig(thinking_level=level)
         return None
 
     def _config(self, system: str, declarations: list[dict] | None = None, search: bool = False):
@@ -212,10 +213,18 @@ class Brain:
                 text = (response.text or "").strip()
                 break
             parts = []
+            done_already = True
             for call in calls:
-                result = await self.runner.run(call.name, dict(call.args or {}), turn)
+                args = dict(call.args or {})
+                result = await self.runner.run(call.name, args, turn)
+                done_already = done_already and settled(call.name, args, result)
                 parts.append(types.Part.from_function_response(name=call.name, response=result))
             contents.append(types.Content(role="user", parts=parts))
+            spoken = _spoken(calls, candidate)
+            if done_already and spoken and turn.pending is None:
+                text = spoken
+                contents.append(types.Content(role="model", parts=[types.Part.from_text(text=text)]))
+                break
             if turn.final_text and len(calls) == 1 and calls[0].name == "web_search":
                 text = turn.final_text
                 contents.append(types.Content(role="model", parts=[types.Part.from_text(text=text)]))
@@ -240,3 +249,16 @@ class Brain:
             self._config(system, search=True),
         )
         return (response.text or "").strip() or ("Dazu finde ich nichts." if turn.lang == "de" else "I found nothing on that.")
+
+
+def _spoken(calls: list, candidate: Any) -> str:
+    """The confirmation the model already wrote: reply fields of the calls, else plain text parts."""
+    replies: list[str] = []
+    for call in calls:
+        reply = str((call.args or {}).get("reply") or "").strip()
+        if reply and reply not in replies:
+            replies.append(reply)
+    if replies:
+        return " ".join(replies)
+    parts = getattr(candidate.content, "parts", None) or []
+    return " ".join(p.text.strip() for p in parts if getattr(p, "text", None) and not getattr(p, "thought", False)).strip()

@@ -149,6 +149,26 @@ DECLARATIONS: list[dict] = [
     },
 ]
 
+# Action tools carry the spoken confirmation, so a fully successful call needs no second model turn.
+QUICK_TOOLS = ("control", "music", "announce", "timer", "remember", "rename")
+REPLY_PROPERTY = {
+    "type": "string",
+    "description": "Kurze gesprochene Bestätigung für den Erfolgsfall, ein Satz im Jarvis-Stil, ohne Kennungen.",
+}
+for _declaration in DECLARATIONS:
+    if _declaration["name"] in QUICK_TOOLS:
+        _declaration["parameters_json_schema"]["properties"]["reply"] = REPLY_PROPERTY
+
+
+def settled(name: str, args: dict, result: dict) -> bool:
+    """True when an action tool fully succeeded and its reply can be spoken as is."""
+    if name not in QUICK_TOOLS or "error" in result:
+        return False
+    if name == "timer" and args.get("action") != "set":
+        return False
+    return not any(item.get("error") or item.get("status") for item in result.get("results") or [])
+
+
 CONFIG_DECLARATION = {
     "name": "loxone_config",
     "description": (

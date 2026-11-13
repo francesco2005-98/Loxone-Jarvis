@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..areas import Area
-from ..brain import confirm, fallback
+from ..brain import confirm, fallback, quick
 from ..brain.gemini import BrainUnavailable
 from ..brain.tools import Pending, Turn
 from ..people import ENROLL_SENTENCES
@@ -291,6 +291,10 @@ class Coordinator:
             if answer == confirm.Answer.NO:
                 return ("Abgebrochen." if lang == "de" else "Cancelled."), []
         turn = Turn(area=area, lang=lang, text=text, person_id=person_id, origin=origin)
+        instant = await self._quick(turn)
+        if instant is not None:
+            _remember(session, text, instant)
+            return instant, turn.done
         try:
             reply, history = await self.house.brain.answer(turn, session.history)
             session.history = history
@@ -323,6 +327,25 @@ class Coordinator:
         if turn.pending is not None:
             session.pending = turn.pending
         return reply, turn.done
+
+    async def _quick(self, turn: Turn) -> str | None:
+        """Plain light commands switch at once, without a round trip to Gemini."""
+        command = quick.parse(turn.text)
+        if command is None:
+            return None
+        entries, room = quick.targets(self.house, turn.area, command)
+        if not entries:
+            return None
+        ok = True
+        for entry in entries:
+            try:
+                result = await self.house.brain.runner.execute(entry, command.action, None, None, turn)
+                ok = ok and bool(result.get("ok"))
+            except Exception:  # noqa: BLE001
+                log.exception("quick command failed")
+                ok = False
+        anrede = self.house.people.address(turn.person_id)[0] if turn.person_id else None
+        return quick.reply(command, room, turn.lang, anrede, ok)
 
     async def _fallback(self, turn: Turn) -> str:
         command = fallback.parse(turn.text)
@@ -419,3 +442,18 @@ class Coordinator:
             self._enroll_publish(job, "listening")
         await asyncio.sleep(0.8)
         await mics.listen(run.mic)
+
+
+def _remember(session: AreaSession, text: str, reply: str) -> None:
+    """Keep instant answers in the conversation so a follow-up like "und wieder aus" has context."""
+    try:
+        from google.genai import types
+    except ImportError:
+        return
+    session.history = (
+        list(session.history)
+        + [
+            types.Content(role="user", parts=[types.Part.from_text(text=text)]),
+            types.Content(role="model", parts=[types.Part.from_text(text=reply)]),
+        ]
+    )[-12:]

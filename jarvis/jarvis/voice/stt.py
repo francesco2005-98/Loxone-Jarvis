@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,7 +41,8 @@ class Recognizer:
 
                 path = self.models_dir / "whisper" / name
                 source = str(path) if path.exists() else name
-                model = WhisperModel(source, device="cpu", compute_type="int8", cpu_threads=4, num_workers=2)
+                threads = max(2, min(8, os.cpu_count() or 4))
+                model = WhisperModel(source, device="cpu", compute_type="int8", cpu_threads=threads, num_workers=1)
                 self._models[name] = model
             return model
 
@@ -52,9 +54,22 @@ class Recognizer:
         if audio.size < 16000 * 0.3:
             return Transcript("", language if language in LANGS else "de", -9.0, 1.0)
         whisper = self._model(model)
-        lang = language if language in LANGS else None
-        if lang is None:
-            lang = self._detect(whisper, audio)
+        fixed = language if language in LANGS else None
+        parts, info = self._run(whisper, audio, fixed, prompt)
+        lang = fixed or info.language
+        if lang not in LANGS:
+            # Detection ran inside the same pass; only a third language costs a second one.
+            lang = _best_of(info)
+            parts, info = self._run(whisper, audio, lang, prompt)
+        text = " ".join(s.text.strip() for s in parts).strip()
+        if not parts:
+            return Transcript("", lang, -9.0, 1.0)
+        avg = sum(s.avg_logprob for s in parts) / len(parts)
+        no_speech = max(s.no_speech_prob for s in parts)
+        return Transcript(text, lang, avg, no_speech)
+
+    @staticmethod
+    def _run(whisper, audio, lang: str | None, prompt: str):
         segments, info = whisper.transcribe(
             audio,
             language=lang,
@@ -65,20 +80,9 @@ class Recognizer:
             vad_filter=True,
             initial_prompt=prompt[:400] or None,
         )
-        parts = list(segments)
-        text = " ".join(s.text.strip() for s in parts).strip()
-        if not parts:
-            return Transcript("", lang, -9.0, 1.0)
-        avg = sum(s.avg_logprob for s in parts) / len(parts)
-        no_speech = max(s.no_speech_prob for s in parts)
-        return Transcript(text, lang, avg, no_speech)
+        return list(segments), info
 
-    @staticmethod
-    def _detect(whisper, audio) -> str:
-        try:
-            _, _, probs = whisper.detect_language(audio)
-            scores = dict(probs)
-            return max(LANGS, key=lambda code: scores.get(code, 0.0))
-        except Exception:  # noqa: BLE001
-            log.debug("language detection failed, using German", exc_info=True)
-            return "de"
+
+def _best_of(info) -> str:
+    scores = dict(getattr(info, "all_language_probs", None) or [])
+    return max(LANGS, key=lambda code: scores.get(code, 0.0)) if scores else "de"

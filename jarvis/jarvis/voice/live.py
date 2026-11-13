@@ -141,7 +141,7 @@ class LiveSession:
     async def _render(self, text: str, lang: str) -> tuple[str | None, float]:
         """Piper audio as base64 WAV for the browser; the Audioserver stays out of Live answers."""
         try:
-            rendered = await self.house.speech.render(text, lang)
+            rendered = await self.house.speech.render(text, lang, lead_ms=0)
         except Exception as exc:  # noqa: BLE001
             log.warning("live answer without audio: %s", exc)
             self.house.events.log("audio", "Live-Antwort ohne Ton", str(exc)[:200])

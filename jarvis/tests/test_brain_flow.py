@@ -128,7 +128,7 @@ def test_search_answer_is_spoken_directly(setup):
 def test_offline_light_uses_main_light(setup):
     house, area, dimmer, gate, sent = setup
     house.secrets.delete("gemini.api_key")
-    reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Licht an", "de", None))
+    reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Kannst du hier mal das Licht an machen", "de", None))
     assert reply == "Licht an."
     assert sent == [(dimmer.uuid, "on")]
     reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Wie spät ist es?", "de", None))
@@ -195,3 +195,60 @@ def test_thinking_level_only_for_gemini_3(setup):
     assert house.brain._thinking() is not None
     house.settings.update({"gemini.model": "gemini-2.5-flash"})
     assert house.brain._thinking() is None
+
+
+def test_plain_light_command_switches_without_gemini(setup):
+    house, area, dimmer, gate, sent = setup
+    house.brain._genai = lambda: (_ for _ in ()).throw(AssertionError("Gemini must not be asked"))
+    session = AreaSession(area.id)
+    reply, done = run(house.coordinator.handle_text(session, area, "Schalte das Licht im Wohnzimmer an.", "de", None))
+    assert reply == "Licht im Wohnzimmer ist an."
+    assert sent == [(dimmer.uuid, "on")]
+    assert done and len(session.history) == 2
+    reply, _ = run(house.coordinator.handle_text(session, area, "Licht aus", "de", None))
+    assert reply == "Licht ist aus."
+    assert sent[-1] == (dimmer.uuid, "off")
+
+
+def test_unknown_room_goes_to_gemini(setup):
+    house, area, dimmer, gate, sent = setup
+    client = FakeClient([text("Ein Dachboden ist nicht eingerichtet.")])
+    house.brain._genai = lambda: client
+    reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Mach das Licht im Dachboden an", "de", None))
+    assert reply == "Ein Dachboden ist nicht eingerichtet."
+    assert sent == []
+
+
+def test_successful_action_needs_one_gemini_round(setup):
+    house, area, dimmer, gate, sent = setup
+    client = FakeClient([call("control", actions=[{"device": dimmer.short_id, "action": "dim", "value": "30"}], reply="Gedimmt auf 30 Prozent.")])
+    house.brain._genai = lambda: client
+    reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Dimm das Deckenlicht auf 30 Prozent", "de", None))
+    assert reply == "Gedimmt auf 30 Prozent."
+    assert len(client.models.calls) == 1
+    assert sent and sent[0][0] == dimmer.uuid
+
+
+def test_failed_action_still_gets_a_second_round(setup):
+    house, area, dimmer, gate, sent = setup
+    client = FakeClient(
+        [
+            call("control", actions=[{"device": "L99", "action": "on"}], reply="Erledigt."),
+            text("Dieses Gerät kenne ich nicht."),
+        ]
+    )
+    house.brain._genai = lambda: client
+    reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Mach L99 an", "de", None))
+    assert reply == "Dieses Gerät kenne ich nicht."
+    assert len(client.models.calls) == 2
+
+
+def test_quick_parser_takes_only_plain_sentences():
+    from jarvis.brain.quick import parse
+
+    assert parse("Jarvis, schalte das Licht im Esszimmer an").room == "esszimmer"
+    assert parse("Mach in der Küche das Licht aus").prep == "in der"
+    assert parse("Licht an").room is None
+    assert parse("turn on the lights in the kitchen").action == "on"
+    assert parse("Mach das Licht im Esszimmer an und die Rollos runter") is None
+    assert parse("Dimm das Licht im Esszimmer auf 30 Prozent") is None

@@ -80,6 +80,17 @@ class House:
         await self.mics.start()
         self.background(self._housekeeping(), "housekeeping")
         self.background(asyncio.to_thread(self.stt.preload, self.settings.get("stt.model")), "stt-preload")
+        self.background(self._warm_voices(), "voice-warmup")
+
+    async def _warm_voices(self, attempts: int = 10) -> None:
+        """Piper loads a voice on first use; doing that now keeps it out of the first answer."""
+        for _ in range(attempts):
+            try:
+                for lang in ("de", "en"):
+                    await self.piper.synthesize(".", lang)
+                return
+            except Exception:  # noqa: BLE001
+                await asyncio.sleep(6)
 
     async def stop(self) -> None:
         for task in list(self._tasks):
@@ -116,6 +127,8 @@ class House:
             self.audioserver.reconnect()
         if "mic.sensitivity" in keys:
             self.mics.apply_sensitivity()
+        if keys & {"voice.de", "voice.en"}:
+            self.background(self._warm_voices(attempts=1), "voice-warmup")
         if "stt.model" in keys:
             self.background(asyncio.to_thread(self.stt.preload, self.settings.get("stt.model")), "stt-preload")
 

@@ -25,10 +25,12 @@ class Speech:
         self._locks: dict[str, asyncio.Lock] = {}
         self.last_start_latency: float | None = None
 
-    async def render(self, text: str, lang: str) -> wav.Pcm:
+    async def render(self, text: str, lang: str, lead_ms: int | None = None) -> wav.Pcm:
+        """Lead silence protects the first syllable on the Audioserver; a browser plays it right away."""
         raw = await self.house.piper.synthesize(text, lang)
         pcm = wav.resample(wav.decode(raw), UPLOAD_RATE)
-        return wav.with_silence(pcm, int(self.house.settings.get("announce.silence_ms")))
+        lead = int(self.house.settings.get("announce.silence_ms")) if lead_ms is None else lead_ms
+        return wav.with_silence(pcm, lead, tail_ms=150 if lead_ms is not None else 250)
 
     def _volume(self, area: Area) -> int:
         fixed = int(self.house.settings.get("announce.volume"))

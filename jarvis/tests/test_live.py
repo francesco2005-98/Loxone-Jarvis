@@ -47,7 +47,7 @@ class _Fake:
             self.handled.append((text, origin))
             return "Erledigt.", ["Licht an"]
 
-        async def render(text, lang):
+        async def render(text, lang, **kw):
             return wav.Pcm(np.zeros(2400, dtype="<i2"), 24000)
 
         house.coordinator.handle_text = handle_text
@@ -113,7 +113,7 @@ def test_live_timer_rings_on_the_open_browser(house):
     async def say(*args):
         spoken.append(args)
 
-    async def render(text, lang):
+    async def render(text, lang, **kw):
         return wav.Pcm(np.zeros(2400, dtype="<i2"), 24000)
 
     house.speech.say = say
