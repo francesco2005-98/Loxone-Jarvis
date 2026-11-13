@@ -25,6 +25,14 @@ RUN mkdir -p /voices \
     done \
  && chmod -R a+rX /voices
 
+# "Jarvis" by ufozone, trained on Thorsten. CC BY-NC-SA 4.0: free for private, non-commercial use.
+# https://huggingface.co/ufozone/piper-de_DE-jarvis-medium
+ARG JARVIS_VOICE_REV=73dc3f53340f644e9db765e237bc061930779553
+RUN base="https://huggingface.co/ufozone/piper-de_DE-jarvis-medium/resolve/${JARVIS_VOICE_REV}" \
+ && curl -fsSL --retry 3 -o /voices/de_DE-jarvis-medium.onnx "${base}/model.onnx" \
+ && curl -fsSL --retry 3 -o /voices/de_DE-jarvis-medium.onnx.json "${base}/config.json" \
+ && chmod a+r /voices/de_DE-jarvis-medium.onnx /voices/de_DE-jarvis-medium.onnx.json
+
 COPY server.py /app/server.py
 
 RUN useradd --uid 10002 --system --no-create-home --shell /usr/sbin/nologin piper
