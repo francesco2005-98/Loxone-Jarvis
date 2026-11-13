@@ -14,6 +14,7 @@ from ..brain import confirm, fallback, quick
 from ..brain.gemini import BrainUnavailable
 from ..brain.tools import Pending, Turn
 from ..people import ENROLL_SENTENCES
+from ..settings import ANREDE_LABELS
 from .arbitration import ARBITRATION_WINDOW, FOLLOWUP_SECONDS, AreaSession, Offer, Phase, rms
 from .speaker import identify, profile_from
 from .vad import Endpointer, VadConfig, high_pass
@@ -345,6 +346,8 @@ class Coordinator:
                 log.exception("quick command failed")
                 ok = False
         anrede = self.house.people.address(turn.person_id)[0] if turn.person_id else None
+        if anrede is None:
+            anrede = ANREDE_LABELS.get(self.house.settings.get("house.default_anrede"))
         return quick.reply(command, room, turn.lang, anrede, ok)
 
     async def _fallback(self, turn: Turn) -> str:

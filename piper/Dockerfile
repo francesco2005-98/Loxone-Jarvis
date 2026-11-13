@@ -27,11 +27,26 @@ RUN mkdir -p /voices \
 
 # "Jarvis" by ufozone, trained on Thorsten. CC BY-NC-SA 4.0: free for private, non-commercial use.
 # https://huggingface.co/ufozone/piper-de_DE-jarvis-medium
+# https://huggingface.co/ufozone/piper-de_DE-jarvis-high
 ARG JARVIS_VOICE_REV=73dc3f53340f644e9db765e237bc061930779553
-RUN base="https://huggingface.co/ufozone/piper-de_DE-jarvis-medium/resolve/${JARVIS_VOICE_REV}" \
- && curl -fsSL --retry 3 -o /voices/de_DE-jarvis-medium.onnx "${base}/model.onnx" \
- && curl -fsSL --retry 3 -o /voices/de_DE-jarvis-medium.onnx.json "${base}/config.json" \
- && chmod a+r /voices/de_DE-jarvis-medium.onnx /voices/de_DE-jarvis-medium.onnx.json
+ARG JARVIS_HIGH_REV=61f75d450b256556ae48f0d7b5b2faa43ccfe93e
+RUN for spec in "medium ${JARVIS_VOICE_REV}" "high ${JARVIS_HIGH_REV}"; do \
+      quality=${spec%% *}; rev=${spec##* }; \
+      base="https://huggingface.co/ufozone/piper-de_DE-jarvis-${quality}/resolve/${rev}"; \
+      curl -fsSL --retry 3 -o "/voices/de_DE-jarvis-${quality}.onnx" "${base}/model.onnx" \
+   && curl -fsSL --retry 3 -o "/voices/de_DE-jarvis-${quality}.onnx.json" "${base}/config.json" || exit 1; \
+    done
+
+# English "Jarvis" by jgkawell, modelled on the film voice. Labelled MIT by the author; trained on game audio,
+# so for private use only. Only the ONNX models are fetched, never the training checkpoints.
+# https://huggingface.co/jgkawell/jarvis
+ARG JGKAWELL_REV=37f8763122312665f091d1fc760abaf1f79b02cc
+RUN for quality in medium high; do \
+      base="https://huggingface.co/jgkawell/jarvis/resolve/${JGKAWELL_REV}/en/en_GB/jarvis/${quality}"; \
+      curl -fsSL --retry 3 -o "/voices/en_GB-jarvis-${quality}.onnx" "${base}/jarvis-${quality}.onnx" \
+   && curl -fsSL --retry 3 -o "/voices/en_GB-jarvis-${quality}.onnx.json" "${base}/jarvis-${quality}.onnx.json" || exit 1; \
+    done \
+ && chmod a+r /voices/*jarvis*
 
 COPY server.py /app/server.py
 

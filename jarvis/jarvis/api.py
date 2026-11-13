@@ -245,6 +245,7 @@ def build_router(house: House) -> APIRouter:
             "last": house.coordinator.last,
             "timezone": house.settings.get("house.timezone"),
             "notes": house.settings.get("house.notes"),
+            "default_anrede": house.settings.get("house.default_anrede"),
             "location": {
                 "label": house.settings.get("house.location"),
                 "lat": house.settings.get("house.lat"),

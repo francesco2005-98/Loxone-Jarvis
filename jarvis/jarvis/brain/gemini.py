@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..location import sun_times
+from ..settings import ANREDE_LABELS
 from ..loxone.catalog import ACTIONS
 from .prompt import SpeakerInfo, build_system
 from .tools import ToolRunner, Turn, settled
@@ -192,6 +193,7 @@ class Brain:
             favorites=house.cached_favorites(area),
             config_available=config_available,
             location=self.location_line(),
+            default_anrede=ANREDE_LABELS.get(house.settings.get("house.default_anrede")),
             zones=[f"{z.name} (Raum {z.room})" if z.room and z.room != z.name else z.name for z in house.miniserver.structure.zones()],
         )
 

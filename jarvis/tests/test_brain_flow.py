@@ -202,9 +202,10 @@ def test_plain_light_command_switches_without_gemini(setup):
     house.brain._genai = lambda: (_ for _ in ()).throw(AssertionError("Gemini must not be asked"))
     session = AreaSession(area.id)
     reply, done = run(house.coordinator.handle_text(session, area, "Schalte das Licht im Wohnzimmer an.", "de", None))
-    assert reply == "Licht im Wohnzimmer ist an."
+    assert reply == "Licht im Wohnzimmer ist an, Sir."
     assert sent == [(dimmer.uuid, "on")]
     assert done and len(session.history) == 2
+    house.settings.update({"house.default_anrede": ""})
     reply, _ = run(house.coordinator.handle_text(session, area, "Licht aus", "de", None))
     assert reply == "Licht ist aus."
     assert sent[-1] == (dimmer.uuid, "off")
@@ -288,3 +289,21 @@ def test_bereich_with_zone_wins_and_gemini_sees_all_zones(setup):
     assert [t.id for t in targets] == [dining.id], "same zone only once, as the Bereich"
     system = house.brain.system_for(Turn(area=area, lang="de", text=""), False)
     assert "AUDIO-ZONEN IN LOXONE" in system and "Esszimmer" in system and "Lautsprecher Bad (Raum Bad OG)" in system
+
+
+def test_butler_persona_and_default_anrede(setup):
+    house, area, *_ = setup
+    system = house.brain.system_for(Turn(area=area, lang="de", text=""), False)
+    assert "J.A.R.V.I.S." in system and "britischen Butlers" in system
+    assert 'Sprich die Person mit "Sir" an' in system
+    house.settings.update({"house.default_anrede": ""})
+    assert "keine Anrede wie Sir" in house.brain.system_for(Turn(area=area, lang="de", text=""), False)
+
+
+def test_old_default_persona_follows_the_new_one(house):
+    from jarvis.settings import DEFAULT_PERSONA, LEGACY_PERSONAS, Settings
+
+    house.settings.update({"gemini.system_prompt": LEGACY_PERSONAS[0]})
+    assert Settings(house.db).get("gemini.system_prompt") == DEFAULT_PERSONA
+    house.settings.update({"gemini.system_prompt": "Eigener Text."})
+    assert Settings(house.db).get("gemini.system_prompt") == "Eigener Text.", "own prompts stay untouched"

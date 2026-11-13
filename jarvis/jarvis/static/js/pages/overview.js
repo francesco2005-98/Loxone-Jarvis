@@ -60,6 +60,14 @@ export default function overview(view, ctx) {
   );
   const notes = h("textarea", { class: "input", rows: 6, placeholder: "z. B. Wir essen meistens um 19 Uhr. Die Katze heißt Mila." });
   const tzSelect = selectEl(timezones(), "Europe/Berlin");
+  const anredeSelect = selectEl(
+    [
+      { value: "sir", label: "Sir" },
+      { value: "mam", label: "Ma'am" },
+      { value: "", label: "Keine Anrede" },
+    ],
+    "sir",
+  );
   const saveHouse = h("button", { class: "btn primary", type: "button" }, "Speichern");
 
   // Location: picked from the search, from the device, or found automatically when saving a typed address.
@@ -159,7 +167,16 @@ export default function overview(view, ctx) {
       if (!typed) Object.assign(site, { label: "", lat: null, lon: null });
       await ctx.api("/settings", {
         method: "PUT",
-        body: { values: { "house.notes": notes.value, "house.timezone": tzSelect.value, "house.location": site.label, "house.lat": site.lat, "house.lon": site.lon } },
+        body: {
+          values: {
+            "house.notes": notes.value,
+            "house.timezone": tzSelect.value,
+            "house.default_anrede": anredeSelect.value,
+            "house.location": site.label,
+            "house.lat": site.lat,
+            "house.lon": site.lon,
+          },
+        },
       });
       showPlace();
       toast("Haushalt gespeichert");
@@ -181,6 +198,8 @@ export default function overview(view, ctx) {
       notes,
       h("div", { class: "label" }, "Zeitzone für Timer und Erinnerungen"),
       tzSelect,
+      h("div", { class: "label" }, "Anrede, wenn Jarvis die Stimme nicht erkennt"),
+      anredeSelect,
       h("div", { class: "row" }, h("span", { class: "spacer" }), saveHouse),
     ),
   );
@@ -396,6 +415,7 @@ export default function overview(view, ctx) {
       renderUsage(data.usage);
       notes.value = data.notes || "";
       tzSelect.value = data.timezone;
+      anredeSelect.value = data.default_anrede ?? "sir";
       const loc = data.location || {};
       Object.assign(site, { label: loc.label || "", lat: loc.lat ?? null, lon: loc.lon ?? null });
       locInput.value = site.label || loc.suggestion || "";

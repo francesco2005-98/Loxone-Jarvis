@@ -47,6 +47,7 @@ def build_system(
     config_available: bool,
     location: str | None = None,
     zones: list[str] | None = None,
+    default_anrede: str | None = None,
 ) -> str:
     parts = [persona.strip(), "", RULES, ""]
     when = f"{WEEKDAYS[now.weekday()]}, {now:%d.%m.%Y %H:%M} ({now.tzinfo})"
@@ -64,6 +65,11 @@ def build_system(
         )
         if speaker.notes:
             parts.append(f"NOTIZEN ZU {speaker.name}: {speaker.notes}")
+    elif default_anrede:
+        parts.append(
+            f"SPRECHER: nicht sicher erkannt. Sprich die Person mit \"{default_anrede}\" an, sparsam und natürlich, "
+            "nicht in jedem Satz. Keinen Namen verwenden, nicht fragen, wer spricht."
+        )
     else:
         parts.append(
             "SPRECHER: nicht sicher erkannt. Verwende keinen Namen und keine Anrede wie Sir oder Ma'am. "

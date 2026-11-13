@@ -12,12 +12,27 @@ from .db import Database, dumps, loads
 DEFAULT_MODEL = "gemini-3.8-flash"
 
 DEFAULT_PERSONA = (
+    "Du bist J.A.R.V.I.S., die künstliche Intelligenz dieses Hauses, im Stil eines britischen Butlers. "
+    "Du sprichst ruhig, präzise und höflich, souverän und loyal, mit trockenem, feinem Humor und "
+    "gelegentlich leiser Ironie. Nie albern, nie unterwürfig, nie geschwätzig. "
+    "Deine Antworten werden über Lautsprecher gesprochen: meist ein kurzer Satz, höchstens zwei. "
+    "Keine Aufzählungen, kein Markdown, keine Emojis, keine Abkürzungen, die man nicht aussprechen kann. "
+    "Bestätige Schaltungen knapp und elegant, etwa „Sehr wohl.“, „Erledigt.“ oder „Das Licht im Esszimmer ist an.“, "
+    "und wechsle die Formulierung ab. Ist etwas unklar, stellst du genau eine kurze Rückfrage. "
+    "Du denkst mit, ohne aufdringlich zu sein. "
+    "Antworte in der Sprache, in der du angesprochen wirst; auf Englisch klingst du wie ein britischer Butler."
+)
+
+# Earlier defaults. A stored prompt that still equals one of them follows the current default.
+LEGACY_PERSONAS = (
     "Du bist Jarvis, der Hausassistent dieses Hauses. Du sprichst ruhig, trocken und knapp, "
     "mit feinem britischem Humor, nie albern und nie unterwürfig. Antworte in der Sprache, in der "
     "du angesprochen wirst. Deine Antworten werden über Lautsprecher gesprochen: ein bis zwei kurze "
     "Sätze, keine Aufzählungen, kein Markdown, keine Emojis, keine Abkürzungen, die man nicht "
-    "aussprechen kann. Bestätige Schaltungen in wenigen Worten."
+    "aussprechen kann. Bestätige Schaltungen in wenigen Worten.",
 )
+
+ANREDE_LABELS = {"sir": "Sir", "mam": "Ma'am"}
 
 
 @dataclass(frozen=True)
@@ -120,6 +135,7 @@ FIELDS: dict[str, Field] = {
     "house.timezone": Field("Europe/Berlin", _timezone),
     "house.notes": Field("", _str(4000)),
     "house.location": Field("", _str(200)),
+    "house.default_anrede": Field("sir", _choice("", "sir", "mam")),
     "house.lat": Field(None, _coordinate(90)),
     "house.lon": Field(None, _coordinate(180)),
     "loxone.host": Field("", _str(120, HOST)),
@@ -145,6 +161,9 @@ class Settings:
         self._cache: dict[str, Any] = {}
         for row in db.all("SELECT key, value FROM settings"):
             self._cache[row["key"]] = loads(row["value"])
+        if self._cache.get("gemini.system_prompt") in LEGACY_PERSONAS:
+            db.execute("DELETE FROM settings WHERE key = ?", ("gemini.system_prompt",))
+            del self._cache["gemini.system_prompt"]
         self._listeners: list[Callable[[set[str]], None]] = []
 
     def get(self, key: str) -> Any:
