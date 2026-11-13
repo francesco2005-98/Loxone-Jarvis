@@ -190,7 +190,7 @@ class HardeningMiddleware(BaseHTTPMiddleware):
         headers.setdefault("Referrer-Policy", "no-referrer")
         headers.setdefault("X-Frame-Options", "DENY")
         headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
-        headers.setdefault("Permissions-Policy", "serial=(self), camera=(), microphone=(self), geolocation=()")
+        headers.setdefault("Permissions-Policy", "serial=(self), camera=(), microphone=(self), geolocation=(self)")
         if request.url.path.startswith("/api/"):
             headers.setdefault("Cache-Control", "no-store")
         elif request.url.path.startswith("/static/"):

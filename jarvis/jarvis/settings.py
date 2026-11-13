@@ -64,6 +64,18 @@ def _float(lo: float, hi: float) -> Callable[[Any], float]:
     return check
 
 
+def _coordinate(limit: float) -> Callable[[Any], float | None]:
+    def check(value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        number = float(value)
+        if not -limit <= number <= limit:
+            raise ValueError(f"zwischen -{limit} und {limit}")
+        return round(number, 5)
+
+    return check
+
+
 def _bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -107,6 +119,9 @@ FIELDS: dict[str, Field] = {
     "announce.silence_ms": Field(600, _int(0, 2000)),
     "house.timezone": Field("Europe/Berlin", _timezone),
     "house.notes": Field("", _str(4000)),
+    "house.location": Field("", _str(200)),
+    "house.lat": Field(None, _coordinate(90)),
+    "house.lon": Field(None, _coordinate(180)),
     "loxone.host": Field("", _str(120, HOST)),
     "loxone.user": Field("jarvis", _str(64, r"[^/\s]+")),
     "loxone.tls": Field(False, _bool),

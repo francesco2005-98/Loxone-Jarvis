@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import __version__
+from . import __version__, location
 from .brain.gemini import BrainUnavailable
 from .house import House
 from .loxone.catalog import ActionError
@@ -55,6 +55,15 @@ class SettingsBody(BaseModel):
 class SecretBody(BaseModel):
     key: str
     value: str = Field(default="", max_length=500)
+
+
+class LocationQuery(BaseModel):
+    query: str = Field(min_length=2, max_length=200)
+
+
+class Coordinates(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
 
 
 class PreviewBody(BaseModel):
@@ -236,7 +245,28 @@ def build_router(house: House) -> APIRouter:
             "last": house.coordinator.last,
             "timezone": house.settings.get("house.timezone"),
             "notes": house.settings.get("house.notes"),
+            "location": {
+                "label": house.settings.get("house.location"),
+                "lat": house.settings.get("house.lat"),
+                "lon": house.settings.get("house.lon"),
+                "suggestion": house.miniserver.structure.location,
+            },
         }
+
+    @router.post("/location/search", dependencies=auth)
+    async def location_search(body: LocationQuery) -> dict:
+        try:
+            return {"results": await location.search(body.query)}
+        except location.LocationError as exc:
+            raise HTTPException(502, str(exc)) from exc
+
+    @router.post("/location/reverse", dependencies=auth)
+    async def location_reverse(body: Coordinates) -> dict:
+        try:
+            label = await location.reverse(body.lat, body.lon)
+        except location.LocationError:
+            label = f"{body.lat:.5f}, {body.lon:.5f}"
+        return {"label": label, "lat": round(body.lat, 5), "lon": round(body.lon, 5)}
 
     # --------------------------------------------------------------- settings
     @router.get("/settings", dependencies=auth)
