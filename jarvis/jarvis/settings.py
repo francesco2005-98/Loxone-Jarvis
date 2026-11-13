@@ -34,6 +34,12 @@ LEGACY_PERSONAS = (
 
 ANREDE_LABELS = {"sir": "Sir", "mam": "Ma'am"}
 
+# Stored values that still equal an earlier default follow the current default.
+LEGACY_DEFAULTS: dict[str, tuple] = {
+    "gemini.system_prompt": LEGACY_PERSONAS,
+    "announce.silence_ms": (600,),
+}
+
 
 @dataclass(frozen=True)
 class Field:
@@ -131,7 +137,7 @@ FIELDS: dict[str, Field] = {
     "mic.noise_filter": Field(2, _int(0, 4)),
     "mic.sensitivity": Field(50, _int(0, 100)),
     "announce.volume": Field(0, _int(0, 100)),
-    "announce.silence_ms": Field(600, _int(0, 2000)),
+    "announce.silence_ms": Field(300, _int(0, 2000)),
     "house.timezone": Field("Europe/Berlin", _timezone),
     "house.notes": Field("", _str(4000)),
     "house.location": Field("", _str(200)),
@@ -161,9 +167,10 @@ class Settings:
         self._cache: dict[str, Any] = {}
         for row in db.all("SELECT key, value FROM settings"):
             self._cache[row["key"]] = loads(row["value"])
-        if self._cache.get("gemini.system_prompt") in LEGACY_PERSONAS:
-            db.execute("DELETE FROM settings WHERE key = ?", ("gemini.system_prompt",))
-            del self._cache["gemini.system_prompt"]
+        for key, old in LEGACY_DEFAULTS.items():
+            if key in self._cache and self._cache[key] in old:
+                db.execute("DELETE FROM settings WHERE key = ?", (key,))
+                del self._cache[key]
         self._listeners: list[Callable[[set[str]], None]] = []
 
     def get(self, key: str) -> Any:

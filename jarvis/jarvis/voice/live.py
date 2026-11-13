@@ -34,6 +34,7 @@ PREROLL_FRAMES = 10
 # so the device can show "listening" before the speaker has finished.
 EARLY_CHECKS_MS = (700, 1400)
 EARLY_MODEL = "base"
+SPECULATE_MS = 250
 UTTERANCE_SECONDS = 12.0
 
 # Spellings Whisper produces for "Jarvis" in German and English speech.
@@ -65,7 +66,7 @@ class Segmenter:
         self.config = VadConfig(
             margin_db=base.margin_db,
             floor_dbfs=base.floor_dbfs,
-            end_silence_ms=700,
+            end_silence_ms=550,
             no_speech_timeout_ms=10**9,
             max_utterance_ms=12000,
         )
@@ -76,6 +77,15 @@ class Segmenter:
     @property
     def speaking(self) -> bool:
         return self._endpointer.speech_started
+
+    @property
+    def key(self) -> tuple[int, int]:
+        """Identifies the sentence and its last spoken frame; stays the same through a pause."""
+        return self.count, self._endpointer.last_speech_ms
+
+    @property
+    def silence_ms(self) -> int:
+        return self._endpointer.silence_ms
 
     @property
     def speech_ms(self) -> int:
@@ -92,9 +102,9 @@ class Segmenter:
         self._audio = bytearray()
         self._buffer = b""
 
-    def feed(self, chunk: bytes) -> list[bytes]:
+    def feed(self, chunk: bytes) -> list[tuple[bytes, tuple[int, int]]]:
         self._buffer += chunk
-        done: list[bytes] = []
+        done: list[tuple[bytes, tuple[int, int]]] = []
         while len(self._buffer) >= FRAME_BYTES:
             frame, self._buffer = self._buffer[:FRAME_BYTES], self._buffer[FRAME_BYTES:]
             ep = self._endpointer
@@ -109,9 +119,10 @@ class Segmenter:
             if result in ("end", "timeout"):
                 self._noise = ep._noise
                 segment = bytes(self._audio) if result == "end" else b""
+                key = self.key
                 self.reset()
                 if segment:
-                    done.append(segment)
+                    done.append((segment, key))
         return done
 
 
@@ -129,7 +140,9 @@ class LiveSession:
         self.segmenter = Segmenter(int(house.settings.get("mic.noise_filter")))
         self.queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._played = asyncio.Event()
+        self._stt_ms = 0
         self._early: asyncio.Task | None = None
+        self._spec: tuple[tuple[int, int], asyncio.Future] | None = None
         self._early_segment = 0
         self._early_step = 0
 
@@ -154,11 +167,32 @@ class LiveSession:
     def feed(self, data: bytes) -> None:
         if self.phase in ("thinking", "speaking"):
             return
-        for segment in self.segmenter.feed(data):
+        for item in self.segmenter.feed(data):
             while self.queue.qsize() >= MAX_BACKLOG:
                 self.queue.get_nowait()
-            self.queue.put_nowait(segment)
+            self.queue.put_nowait(item)
         self._maybe_early()
+        self._speculate()
+
+    def _speculate(self) -> None:
+        """Start recognition on a short pause; the result is used if the pause ends the sentence."""
+        seg = self.segmenter
+        if not seg.speaking:
+            return
+        if self._spec is not None and self._spec[0] != seg.key:
+            self._spec = None
+        if self._spec is None and seg.silence_ms >= SPECULATE_MS:
+            self._spec = (seg.key, asyncio.ensure_future(self._transcribe(seg.audio())))
+
+    async def _transcribe(self, pcm: bytes):
+        house = self.house
+        return await asyncio.to_thread(
+            house.stt.transcribe,
+            high_pass(pcm, int(house.settings.get("mic.noise_filter"))),
+            model=house.settings.get("stt.model"),
+            language=house.settings.get("stt.language"),
+            prompt=house.coordinator._stt_prompt(),
+        )
 
     def _maybe_early(self) -> None:
         seg = self.segmenter
@@ -220,13 +254,13 @@ class LiveSession:
             if self.phase in ("listening", "followup"):
                 timeout = max(0.05, self.until - time.monotonic())
             try:
-                segment = await asyncio.wait_for(self.queue.get(), timeout)
+                segment, key = await asyncio.wait_for(self.queue.get(), timeout)
             except asyncio.TimeoutError:
                 self.session.reset()
                 await self._state("idle")
                 continue
             try:
-                await self._segment(segment)
+                await self._segment(segment, key)
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001
@@ -234,17 +268,16 @@ class LiveSession:
                 await self.send({"type": "error", "text": "Das hat nicht geklappt."})
                 await self._state("idle")
 
-    async def _segment(self, pcm: bytes) -> None:
-        house = self.house
+    async def _segment(self, pcm: bytes, key: tuple[int, int] | None = None) -> None:
         if self.phase == "listening":
             self.until = min(self.until, time.monotonic() + LISTEN_SECONDS)
-        transcript = await asyncio.to_thread(
-            house.stt.transcribe,
-            high_pass(pcm, int(house.settings.get("mic.noise_filter"))),
-            model=house.settings.get("stt.model"),
-            language=house.settings.get("stt.language"),
-            prompt=house.coordinator._stt_prompt(),
-        )
+        started = time.monotonic()
+        spec, self._spec = self._spec, None
+        if spec is not None and key is not None and spec[0] == key:
+            transcript = await spec[1]
+        else:
+            transcript = await self._transcribe(pcm)
+        self._stt_ms = int((time.monotonic() - started) * 1000)
         if not transcript.usable:
             return
         woke, rest = split_wake(transcript.text)
@@ -271,7 +304,8 @@ class LiveSession:
         started = time.monotonic()
         person_id = await asyncio.to_thread(coordinator._identify, pcm)
         reply, done = await coordinator.handle_text(self.session, self.area, text, lang, person_id, origin="live")
-        latency = int((time.monotonic() - started) * 1000)
+        brain_ms = int((time.monotonic() - started) * 1000)
+        latency = brain_ms + self._stt_ms
         coordinator.latencies.append(latency)
         coordinator.last = {
             "ts": time.time(),
@@ -280,10 +314,13 @@ class LiveSession:
             "reply": reply,
             "actions": done,
             "ms": latency,
+            "timing": {"stt": self._stt_ms, "brain": brain_ms},
         }
         house.events.publish({"type": "utterance", "utterance": coordinator.last})
         house.events.log("voice", f"Live: „{text}“", reply[:200])
+        voice_started = time.monotonic()
         audio, duration = await self._render(reply, lang) if reply else (None, 0.0)
+        coordinator.last["timing"]["voice"] = int((time.monotonic() - voice_started) * 1000)
         self._played.clear()
         await self._state("speaking")
         await self.send({"type": "reply", "text": reply, "actions": done, "audio": audio})

@@ -48,8 +48,26 @@ def build_system(
     location: str | None = None,
     zones: list[str] | None = None,
     default_anrede: str | None = None,
+    states: list[str] | None = None,
 ) -> str:
+    """Stable parts first, changing parts last: Gemini reuses the cached prefix and answers faster."""
     parts = [persona.strip(), "", RULES, ""]
+    parts.append("BEREICHE (für Musik, Durchsagen, Hauptlicht): " + (", ".join(areas) if areas else "keine"))
+    parts.append(
+        "AUDIO-ZONEN IN LOXONE (für music und announce direkt nutzbar, auch ohne Bereich): "
+        + (", ".join(zones) if zones else "keine")
+    )
+    parts.append("")
+    parts.append("GERÄTELISTE (Kennung | Name | Raum | Art | auch genannt | Aktionen | Hinweise):")
+    parts.extend(devices if devices else ["(keine Geräte freigegeben)"])
+    if not config_available:
+        parts.append("")
+        parts.append("Loxone Config ist nicht verbunden: Programmänderungen sind gerade nicht möglich.")
+    if household_notes.strip():
+        parts.append("")
+        parts.append(f"NOTIZEN DES HAUSHALTS: {household_notes.strip()}")
+
+    parts.append("")
     when = f"{WEEKDAYS[now.weekday()]}, {now:%d.%m.%Y %H:%M} ({now.tzinfo})"
     parts.append(f"JETZT: {when}")
     if location:
@@ -75,20 +93,9 @@ def build_system(
             "SPRECHER: nicht sicher erkannt. Verwende keinen Namen und keine Anrede wie Sir oder Ma'am. "
             "Frag nicht, wer spricht."
         )
-    if household_notes.strip():
-        parts.append(f"NOTIZEN DES HAUSHALTS: {household_notes.strip()}")
-    parts.append("")
-    parts.append("BEREICHE (für Musik, Durchsagen, Hauptlicht): " + (", ".join(areas) if areas else "keine"))
-    parts.append(
-        "AUDIO-ZONEN IN LOXONE (für music und announce direkt nutzbar, auch ohne Bereich): "
-        + (", ".join(zones) if zones else "keine")
-    )
     if favorites:
         parts.append("MUSIK-FAVORITEN HIER: " + ", ".join(favorites))
-    parts.append("")
-    parts.append("GERÄTELISTE (Kennung | Name | Raum | Art | auch genannt | Aktionen | Zustand | Hinweise):")
-    parts.extend(devices if devices else ["(keine Geräte freigegeben)"])
-    if not config_available:
-        parts.append("")
-        parts.append("Loxone Config ist nicht verbunden: Programmänderungen sind gerade nicht möglich.")
+    if states:
+        parts.append("AKTUELLE ZUSTÄNDE (Kennung: Zustand):")
+        parts.extend(states)
     return "\n".join(parts)

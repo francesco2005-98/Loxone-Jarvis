@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime
 from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 LEVEL_INTERVAL = 0.06
+# Recognition starts on a short pause and is kept if the pause turns into the end of the sentence.
+SPECULATE_MS = 250
 
 
 @dataclass
@@ -37,6 +40,8 @@ class Run:
     audio: bytearray = field(default_factory=bytearray)
     state: str = "collecting"
     started: float = field(default_factory=time.monotonic)
+    spec: asyncio.Future | None = None
+    spec_anchor: int = -1
 
 
 @dataclass
@@ -139,6 +144,30 @@ class Coordinator:
         result = run.endpointer.feed(data)
         if result != "continue":
             self._finish(run, result)
+        elif run.kind != "enroll":
+            self._speculate(run)
+
+    def _speculate(self, run: Run) -> None:
+        ep = run.endpointer
+        if not ep.speech_started:
+            return
+        if run.spec is not None and run.spec_anchor != ep.last_speech_ms:
+            run.spec = None
+        if run.spec is None and ep.silence_ms >= SPECULATE_MS:
+            run.spec_anchor = ep.last_speech_ms
+            run.spec = asyncio.ensure_future(self._transcribe(bytes(run.audio)))
+
+    async def _transcribe(self, audio: bytes):
+        house = self.house
+        pcm = high_pass(audio, int(house.settings.get("mic.noise_filter")))
+        transcript = await asyncio.to_thread(
+            house.stt.transcribe,
+            pcm,
+            model=house.settings.get("stt.model"),
+            language=house.settings.get("stt.language"),
+            prompt=self._stt_prompt(),
+        )
+        return pcm, transcript
 
     async def on_stop(self, mic: "Mic", abort: bool) -> None:
         run = self.runs.get(mic.id)
@@ -226,14 +255,14 @@ class Coordinator:
         self._phase(run.area_id)
         started = time.monotonic()
         try:
-            pcm = high_pass(audio, int(house.settings.get("mic.noise_filter")))
-            transcript = await asyncio.to_thread(
-                house.stt.transcribe,
-                pcm,
-                model=house.settings.get("stt.model"),
-                language=house.settings.get("stt.language"),
-                prompt=self._stt_prompt(),
+            who = asyncio.ensure_future(
+                asyncio.to_thread(self._identify, high_pass(audio, int(house.settings.get("mic.noise_filter"))))
             )
+            if run.spec is not None and run.spec_anchor == run.endpointer.last_speech_ms:
+                pcm, transcript = await run.spec
+            else:
+                pcm, transcript = await self._transcribe(audio)
+            stt_ms = int((time.monotonic() - started) * 1000)
             mics.send(run.mic, "STT_END", {"text": transcript.text[:200] or " "})
             mics.send(run.mic, "INTENT_START")
             mics.send(run.mic, "INTENT_END", {"conversation_id": "", "continue_conversation": "0"})
@@ -242,8 +271,10 @@ class Coordinator:
             if area is None or not transcript.usable:
                 session.reset()
                 return
-            person_id = await asyncio.to_thread(self._identify, pcm)
+            person_id = await who
+            brain_started = time.monotonic()
             reply, done = await self.handle_text(session, area, transcript.text, transcript.lang, person_id)
+            brain_ms = int((time.monotonic() - brain_started) * 1000)
             latency = int((time.monotonic() - started) * 1000)
             self.latencies.append(latency)
             self.last = {
@@ -253,12 +284,14 @@ class Coordinator:
                 "reply": reply,
                 "actions": done,
                 "ms": latency,
+                "timing": {"stt": stt_ms, "brain": brain_ms},
             }
             house.events.publish({"type": "utterance", "utterance": self.last})
             house.events.log("voice", f"„{transcript.text}“", reply[:200])
             if reply:
                 session.start_speaking()
                 await house.speech.say(reply, transcript.lang, [area])
+                self.last["timing"]["voice"] = house.speech.last_voice_ms
             if session.phase in (Phase.SPEAKING, Phase.THINKING):
                 session.open_followup(run.mic.id)
                 until = session.followup_until
@@ -330,24 +363,27 @@ class Coordinator:
         return reply, turn.done
 
     async def _quick(self, turn: Turn) -> str | None:
-        """Plain light commands switch at once, without a round trip to Gemini."""
+        """Plain commands (light, dimming, blinds, time, date) are handled at once, without Gemini."""
         command = quick.parse(turn.text)
         if command is None:
             return None
+        anrede = self.house.people.address(turn.person_id)[0] if turn.person_id else None
+        if anrede is None:
+            anrede = ANREDE_LABELS.get(self.house.settings.get("house.default_anrede"))
+        if command.kind in ("time", "date"):
+            return quick.clock_reply(command, datetime.now(self.house.settings.tz), turn.lang, anrede)
         entries, room = quick.targets(self.house, turn.area, command)
         if not entries:
             return None
+        value = str(command.value) if command.value is not None else None
         ok = True
         for entry in entries:
             try:
-                result = await self.house.brain.runner.execute(entry, command.action, None, None, turn)
+                result = await self.house.brain.runner.execute(entry, command.action, value, None, turn)
                 ok = ok and bool(result.get("ok"))
             except Exception:  # noqa: BLE001
                 log.exception("quick command failed")
                 ok = False
-        anrede = self.house.people.address(turn.person_id)[0] if turn.person_id else None
-        if anrede is None:
-            anrede = ANREDE_LABELS.get(self.house.settings.get("house.default_anrede"))
         return quick.reply(command, room, turn.lang, anrede, ok)
 
     async def _fallback(self, turn: Turn) -> str:

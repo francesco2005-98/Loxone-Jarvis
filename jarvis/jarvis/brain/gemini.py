@@ -23,6 +23,9 @@ log = logging.getLogger(__name__)
 MAX_STEPS = 6
 HISTORY_ITEMS = 12
 REQUEST_TIMEOUT_MS = 25000
+# A warm HTTPS connection saves DNS and the TLS handshake on every sentence after a pause.
+WARM_SECONDS = 45
+KEEPALIVE_SECONDS = 300
 
 
 class BrainUnavailable(RuntimeError):
@@ -36,6 +39,7 @@ class Brain:
         self.runner.search = self.search
         self._client = None
         self._client_key: str | None = None
+        self._session = None
         self._models: list[str] = []
         self._models_at = 0.0
         self.last_latency_ms: int | None = None
@@ -50,9 +54,35 @@ class Brain:
             from google import genai
             from google.genai import types
 
-            self._client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS))
+            options = types.HttpOptions(timeout=REQUEST_TIMEOUT_MS)
+            session = self._http_session()
+            if session is not None:
+                options.aiohttp_client = session
+            self._client = genai.Client(api_key=key, http_options=options)
             self._client_key = key
         return self._client
+
+    def _http_session(self):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        if self._session is None or self._session.closed:
+            import aiohttp
+
+            self._session = aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(keepalive_timeout=KEEPALIVE_SECONDS, ttl_dns_cache=600, limit=8)
+            )
+        return self._session
+
+    async def keep_warm(self) -> None:
+        while True:
+            if self.house.secrets.has("gemini.api_key"):
+                try:
+                    await self._genai().aio.models.get(model=self.model)
+                except Exception:  # noqa: BLE001
+                    log.debug("gemini warm-up failed", exc_info=True)
+            await asyncio.sleep(WARM_SECONDS)
 
     @property
     def model(self) -> str:
@@ -156,6 +186,7 @@ class Brain:
         area = turn.area
         entries = house.catalog.entries(only_allowed=True)
         devices = []
+        states = []
         for entry in entries:
             state = house.catalog.describe_state(entry, house.miniserver.state)
             extra = house.catalog.extras(entry, house.miniserver.state)
@@ -172,11 +203,12 @@ class Brain:
                         f"{label}/{entry.type}{flag}",
                         ", ".join(entry.aliases) or "-",
                         ",".join(ACTIONS.get(entry.type, ())),
-                        state or "-",
                         extra or "-",
                     ]
                 )
             )
+            if state:
+                states.append(f"{entry.short_id}: {state}")
         anrede, name, notes = house.people.address(turn.person_id)
         speaker = SpeakerInfo(anrede, name, notes) if anrede else None
         main = house.catalog.get(area.main_light) if area.main_light else None
@@ -194,6 +226,7 @@ class Brain:
             config_available=config_available,
             location=self.location_line(),
             default_anrede=ANREDE_LABELS.get(house.settings.get("house.default_anrede")),
+            states=states,
             zones=[f"{z.name} (Raum {z.room})" if z.room and z.room != z.name else z.name for z in house.miniserver.structure.zones()],
         )
 

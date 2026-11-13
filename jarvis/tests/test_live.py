@@ -34,7 +34,7 @@ def test_segmenter_cuts_one_sentence_with_preroll():
     speech = _tone(1.2, 8000)
     out = seg.feed(quiet) + seg.feed(speech) + seg.feed(_tone(1.0, 20))
     assert len(out) == 1
-    assert len(speech) <= len(out[0]) <= len(speech) + 16000 * 2
+    assert len(speech) <= len(out[0][0]) <= len(speech) + 16000 * 2
 
 
 class _Fake:
@@ -219,3 +219,36 @@ def test_wake_word_is_noticed_while_still_speaking(house):
     assert models[0] == "base"
     assert {"type": "state", "phase": "listening"} in sent
     assert session.queue.empty(), "the sentence is still running"
+
+
+def test_recognition_starts_in_the_pause_and_is_reused(house):
+    calls = []
+
+    def transcribe(pcm, **kw):
+        calls.append(kw["model"])
+        return Transcript("Wie spät ist es", "de", -0.2, 0.01)
+
+    house.stt.transcribe = transcribe
+    session, sent = _session(house)
+    session.phase = "listening"
+    session.until = time.monotonic() + 30
+    handled = []
+
+    async def handle(text, lang, pcm):
+        handled.append(text)
+
+    session._handle = handle
+
+    async def scenario():
+        session.feed(_tone(0.5, 20))
+        session.feed(_tone(1.0, 8000))
+        session.feed(_tone(0.3, 20))
+        assert session._spec is not None, "a 300 ms pause starts recognition"
+        await asyncio.sleep(0.05)
+        session.feed(_tone(0.4, 20))
+        segment, key = session.queue.get_nowait()
+        await session._segment(segment, key)
+
+    run(scenario())
+    assert calls.count("small") == 1, "the speculative result was used, no second pass"
+    assert handled == ["Wie spät ist es"]

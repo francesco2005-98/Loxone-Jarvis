@@ -131,7 +131,7 @@ def test_offline_light_uses_main_light(setup):
     reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Kannst du hier mal das Licht an machen", "de", None))
     assert reply == "Licht an."
     assert sent == [(dimmer.uuid, "on")]
-    reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Wie spät ist es?", "de", None))
+    reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Wer hat gestern gewonnen?", "de", None))
     assert "nicht erreichbar" in reply
 
 
@@ -252,7 +252,12 @@ def test_quick_parser_takes_only_plain_sentences():
     assert parse("Licht an").room is None
     assert parse("turn on the lights in the kitchen").action == "on"
     assert parse("Mach das Licht im Esszimmer an und die Rollos runter") is None
-    assert parse("Dimm das Licht im Esszimmer auf 30 Prozent") is None
+    assert parse("Dimm das Licht im Esszimmer auf 30 Prozent").value == 30
+    assert parse("Fahr die Rollos im Wohnzimmer runter").action == "down"
+    assert parse("Rollos hoch").room is None
+    assert parse("Wie spät ist es?").kind == "time"
+    assert parse("Mach das Licht im Esszimmer gemütlich") is None
+    assert parse("Dimm das Licht auf 300 Prozent") is None
 
 
 ZONES = {
@@ -307,3 +312,29 @@ def test_old_default_persona_follows_the_new_one(house):
     assert Settings(house.db).get("gemini.system_prompt") == DEFAULT_PERSONA
     house.settings.update({"gemini.system_prompt": "Eigener Text."})
     assert Settings(house.db).get("gemini.system_prompt") == "Eigener Text.", "own prompts stay untouched"
+
+
+def test_blinds_dimming_and_time_without_gemini(setup):
+    house, area, dimmer, gate, sent = setup
+    house.brain._genai = lambda: (_ for _ in ()).throw(AssertionError("Gemini must not be asked"))
+    shade = next(e for e in house.catalog.entries() if e.name == "Rollo Terrasse")
+    house.catalog.update(shade.short_id, allowed=True)
+    house.settings.update({"house.default_anrede": ""})
+    session = AreaSession(area.id)
+    reply, _ = run(house.coordinator.handle_text(session, area, "Fahr die Rollos im Wohnzimmer runter", "de", None))
+    assert reply == "Die Rollos im Wohnzimmer fahren runter."
+    assert sent[-1][0] == shade.uuid
+    reply, _ = run(house.coordinator.handle_text(session, area, "Dimm das Licht im Wohnzimmer auf 30 Prozent", "de", None))
+    assert reply == "Licht im Wohnzimmer auf 30 Prozent."
+    assert sent[-1][0] == dimmer.uuid
+    reply, _ = run(house.coordinator.handle_text(session, area, "Wie spät ist es?", "de", None))
+    assert reply.startswith("Es ist ") and "Uhr" in reply
+
+
+def test_old_lead_silence_follows_the_new_default(house):
+    from jarvis.settings import Settings
+
+    house.settings.update({"announce.silence_ms": 600})
+    assert Settings(house.db).get("announce.silence_ms") == 300
+    house.settings.update({"announce.silence_ms": 800})
+    assert Settings(house.db).get("announce.silence_ms") == 800

@@ -30,7 +30,7 @@ class VadConfig:
     margin_db: float = 9.0
     floor_dbfs: float = -52.0
     start_frames: int = 3
-    end_silence_ms: int = 750
+    end_silence_ms: int = 550
     no_speech_timeout_ms: int = 5000
     max_utterance_ms: int = 12000
 
@@ -56,6 +56,15 @@ class Endpointer:
         self._silence_ms = 0
         self._elapsed_ms = 0
         self.speech_started = False
+
+    @property
+    def silence_ms(self) -> int:
+        return self._silence_ms
+
+    @property
+    def last_speech_ms(self) -> int:
+        """Stream position of the last speech frame; unchanged while the speaker stays quiet."""
+        return self._elapsed_ms - self._silence_ms
 
     def _threshold(self) -> float:
         noise = self._noise if self._noise is not None else -60.0

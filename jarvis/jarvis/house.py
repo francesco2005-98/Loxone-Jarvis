@@ -83,6 +83,7 @@ class House:
         self.background(self._housekeeping(), "housekeeping")
         self.background(asyncio.to_thread(self.stt.preload, self.settings.get("stt.model")), "stt-preload")
         self.background(self._warm_voices(), "voice-warmup")
+        self.background(self.brain.keep_warm(), "gemini-warm")
         self.background(asyncio.to_thread(self.stt.preload, "base"), "stt-preload-base")
 
     async def _warm_voices(self, attempts: int = 10) -> None:

@@ -24,6 +24,7 @@ class Speech:
         self.house = house
         self._locks: dict[str, asyncio.Lock] = {}
         self.last_start_latency: float | None = None
+        self.last_voice_ms: int | None = None
 
     async def render(self, text: str, lang: str, lead_ms: int | None = None) -> wav.Pcm:
         """Lead silence protects the first syllable on the Audioserver; a browser plays it right away."""
@@ -60,6 +61,7 @@ class Speech:
             await lock.acquire()
         coordinator = self.house.coordinator
         try:
+            render_started = time.monotonic()
             pcm = await self.render(text, lang)
             for area in speaking:
                 coordinator.set_speaking(area.id, True)
@@ -68,6 +70,7 @@ class Speech:
             try:
                 await asyncio.wait_for(announcement.began.wait(), timeout=4.0)
                 self.last_start_latency = time.monotonic() - started
+                self.last_voice_ms = int((time.monotonic() - render_started) * 1000)
                 await asyncio.wait_for(announcement.finished.wait(), timeout=pcm.duration + 5.0)
             except asyncio.TimeoutError:
                 remaining = pcm.duration + 1.0 - (time.monotonic() - started)
