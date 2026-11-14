@@ -212,7 +212,7 @@ def test_live_speaks_the_suggestion_after_the_reply(house):
 
     session = LiveSession(house, send)
 
-    async def handle_text(s, area, text, lang, person_id, origin=""):
+    async def handle_text(s, area, text, lang, person_id, origin="", followup=False):
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         future.set_result(Pending("offer", "Soll ich die Rollos herunterfahren?", []))

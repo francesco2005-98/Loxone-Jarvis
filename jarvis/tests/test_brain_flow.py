@@ -65,6 +65,32 @@ def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
+def test_talk_not_meant_for_jarvis_ends_the_conversation_quietly(setup):
+    house, area, dimmer, gate, sent = setup
+    client = FakeClient([text("[still]")])
+    house.brain._genai = lambda: client
+    session = AreaSession(area.id)
+    session.history = ["earlier"]
+    reply, done = run(house.coordinator.handle_text(session, area, "und dann hat sie gesagt, das geht nicht", "de", None, followup=True))
+    assert (reply, done) == ("", [])
+    assert session.history == ["earlier"], "nothing of it stays in the conversation"
+    said = client.models.calls[0]["contents"][-1].parts[0].text
+    assert said.startswith("[Nachfrage]") and "[Nachfrage]" in client.models.calls[0]["config"].system_instruction
+    assert run(house.coordinator.handle_text(session, area, "Hm", "de", None, followup=True)) == ("", [])
+    assert len(client.models.calls) == 1, "a stray word never reaches Gemini"
+
+
+def test_a_real_follow_up_is_still_answered(setup):
+    house, area, dimmer, gate, sent = setup
+    client = FakeClient([text("Gern, Sir.[still]")])
+    house.brain._genai = lambda: client
+    session = AreaSession(area.id)
+    reply, _ = run(house.coordinator.handle_text(session, area, "Und wie viel Grad hat es draußen?", "de", None, followup=True))
+    assert reply == "Gern, Sir."
+    reply, done = run(house.coordinator.handle_text(session, area, "Licht im Wohnzimmer aus", "de", None, followup=True))
+    assert done and sent[-1][0] == dimmer.uuid, "instant commands work without the wake word"
+
+
 def test_free_sentence_switches_and_critical_waits_for_yes(setup):
     house, area, dimmer, gate, sent = setup
     client = FakeClient(

@@ -144,6 +144,7 @@ FIELDS: dict[str, Field] = {
     "voice.end_silence_ms": Field(550, _int(300, 1500)),
     "voice.speculative": Field(True, _bool),
     "voice.followup_s": Field(8, _int(0, 20)),
+    "voice.conversation_s": Field(60, _int(15, 300)),
     "brain.quick": Field(True, _bool),
     "brain.thinking": Field("auto", _choice("auto", "minimal", "low", "medium", "high")),
     "brain.suggestions": Field("reserved", _choice("off", "reserved", "active")),

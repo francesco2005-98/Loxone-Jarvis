@@ -71,6 +71,21 @@ def test_wake_word_inside_followup_starts_new_run_and_keeps_history():
     assert session.phase == Phase.COLLECTING and session.history == ["x"]
 
 
+def test_conversation_needs_the_wake_word_again_after_the_limit():
+    clock = Clock()
+    session = AreaSession("wohn", clock=clock)
+    session.offer("a", True)
+    assert session.keep_talking(60)
+    clock.t += 61
+    assert not session.keep_talking(60)
+    session.pending = object()
+    assert session.keep_talking(60), "an open question may still be answered"
+    session.pending = None
+    session.open_followup("a")
+    assert session.offer("a", True) == Offer.ACCEPT
+    assert session.keep_talking(60), "saying Jarvis again restarts the conversation"
+
+
 def test_two_areas_are_independent():
     a, b = AreaSession("schlaf"), AreaSession("wohn")
     assert a.offer("m1", True) == Offer.ACCEPT

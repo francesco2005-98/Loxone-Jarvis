@@ -22,6 +22,9 @@ log = logging.getLogger(__name__)
 
 MAX_STEPS = 6
 HISTORY_ITEMS = 12
+# See the [Nachfrage] rule in prompt.RULES.
+FOLLOWUP_TAG = "[Nachfrage]"
+SILENT = "[still]"
 REQUEST_TIMEOUT_MS = 25000
 # A warm HTTPS connection saves DNS and the TLS handshake on every sentence after a pause.
 WARM_SECONDS = 45
@@ -292,7 +295,8 @@ class Brain:
         declarations = self.runner.declarations(config_available)
         config = self._config(system, declarations)
         contents = list(history[-HISTORY_ITEMS:])
-        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=turn.text)]))
+        said = f"{FOLLOWUP_TAG} {turn.text}" if turn.followup else turn.text
+        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=said)]))
         text = ""
         for _ in range(MAX_STEPS):
             response = await self.generate(contents, config)
@@ -321,6 +325,10 @@ class Brain:
                 text = turn.final_text
                 contents.append(types.Content(role="model", parts=[types.Part.from_text(text=text)]))
                 break
+        if turn.followup and not turn.done and turn.pending is None and (not text or text.lower().startswith(SILENT)):
+            # Not meant for Jarvis: no answer, and nothing of it stays in the conversation.
+            return "", list(history[-HISTORY_ITEMS:])
+        text = re.sub(re.escape(SILENT), "", text, flags=re.IGNORECASE).strip()
         if not text:
             text = "Erledigt." if turn.done else ("Das habe ich nicht verstanden." if turn.lang == "de" else "I didn't catch that.")
         if turn.offer is not None and turn.pending is None:

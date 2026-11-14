@@ -77,6 +77,7 @@ export default function ai(view, ctx) {
   };
   const endSilence = slider(300, 1500, 50, (v) => `${v} ms`);
   const followup = slider(0, 20, 1, (v) => (v === 0 ? "aus" : `${v} s`));
+  const conversation = slider(15, 300, 15, (v) => (v < 60 ? `${v} s` : `${Math.floor(v / 60)} min${v % 60 ? ` ${v % 60} s` : ""}`));
   const declineHours = slider(0, 24, 1, (v) => (v === 0 ? "nicht merken" : `${v} h`));
   const suggestions = selectEl(
     [
@@ -112,6 +113,7 @@ export default function ai(view, ctx) {
       ...row("Satzende nach", endSilence.row, "So lange Stille gilt als Satzende. Kürzer antwortet schneller, länger lässt Zeit für kurze Denkpausen im Satz."),
       ...row("Vorab-Erkennung", speculative, "Startet die Spracherkennung schon in der ersten kurzen Pause. Ist der Satz bis dahin ein vollständiger Sofortbefehl, antwortet Jarvis sofort, ohne das Satzende abzuwarten. Spart rund 0,3 s."),
       ...row("Nachfrage-Fenster", followup.row, "So lange hört Jarvis nach einer Antwort ohne erneutes „Jarvis“ zu."),
+      ...row("Gespräch endet nach", conversation.row, "So lange nach dem letzten „Jarvis“ gehen Rückfragen ohne Aktivierungswort. Danach, und sobald ein Satz nicht an Jarvis gerichtet ist (Gespräch im Raum, Fernseher), muss er wieder mit „Jarvis“ geweckt werden. Der Gesprächsverlauf wird dann geleert."),
       ...row("Sofortantworten", quickToggle, "Licht, Lichtkreise, Stimmungen, Dimmen, Rollos, Uhrzeit und Datum ohne Gemini, in Jarvis' Persönlichkeit."),
       ...row("Nachdenken von Gemini", thinking, "Weniger Nachdenken antwortet schneller, mehr hilft bei komplexen Fragen."),
       ...row("Vorschläge & Gegenfragen", suggestions, "Jarvis bietet passende Folgeaktionen an, etwa abends die Rollos zu den Lichtern. Ein einfaches „Ja“ genügt, ausgeführt wird sofort und lokal."),
@@ -154,6 +156,7 @@ export default function ai(view, ctx) {
             values: {
               "voice.end_silence_ms": Number(endSilence.input.value),
               "voice.followup_s": Number(followup.input.value),
+              "voice.conversation_s": Number(conversation.input.value),
               "brain.thinking": thinking.value,
               "brain.suggestions": suggestions.value,
               "brain.decline_hours": Number(declineHours.input.value),
@@ -261,6 +264,8 @@ export default function ai(view, ctx) {
       endSilence.update();
       followup.input.value = v["voice.followup_s"];
       followup.update();
+      conversation.input.value = v["voice.conversation_s"];
+      conversation.update();
       thinking.value = v["brain.thinking"];
       suggestions.value = v["brain.suggestions"];
       declineHours.input.value = v["brain.decline_hours"];

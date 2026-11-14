@@ -310,7 +310,13 @@ class Coordinator:
                 return
             person_id = await who
             brain_started = time.monotonic()
-            reply, done = await self.handle_text(session, area, transcript.text, transcript.lang, person_id)
+            followup = run.kind == "followup"
+            reply, done = await self.handle_text(session, area, transcript.text, transcript.lang, person_id, followup=followup)
+            if not reply:
+                house.events.log("voice", f"Nicht an Jarvis: „{transcript.text}“", "Gespräch beendet")
+                session.reset()
+                self._phase(area.id)
+                return
             brain_ms = int((time.monotonic() - brain_started) * 1000)
             latency = int((time.monotonic() - started) * 1000)
             self.latencies.append(latency)
@@ -332,7 +338,13 @@ class Coordinator:
                 offer = await self.take_suggestion(session)
                 if offer is not None:
                     await house.speech.say(offer.question, transcript.lang, [area])
-            if session.phase in (Phase.SPEAKING, Phase.THINKING):
+            if session.phase in (Phase.SPEAKING, Phase.THINKING) and not session.keep_talking(
+                float(house.settings.get("voice.conversation_s"))
+            ):
+                # Long enough since the last "Jarvis": the next sentence needs the wake word again.
+                session.reset()
+                self._phase(area.id)
+            elif session.phase in (Phase.SPEAKING, Phase.THINKING):
                 seconds = float(house.settings.get("voice.followup_s"))
                 if session.pending is not None:
                     seconds = max(seconds, OFFER_FOLLOWUP_MIN)
@@ -358,9 +370,19 @@ class Coordinator:
             self._phase(area_id)
 
     async def handle_text(
-        self, session: AreaSession, area: Area, text: str, lang: str, person_id: str | None, origin: str = ""
+        self,
+        session: AreaSession,
+        area: Area,
+        text: str,
+        lang: str,
+        person_id: str | None,
+        origin: str = "",
+        followup: bool = False,
     ) -> tuple[str, list[str]]:
+        """The spoken reply and the actions taken. An empty reply means: not meant for Jarvis, stay quiet."""
         text = correct(text, self.house)
+        if followup and session.pending is None and _fragment(text):
+            return "", []
         if session.pending is not None:
             pending: Pending = session.pending  # type: ignore[assignment]
             session.pending = None
@@ -379,7 +401,7 @@ class Coordinator:
             else:
                 session.pending = pending
         session.suggestion = None
-        turn = Turn(area=area, lang=lang, text=text, person_id=person_id, origin=origin)
+        turn = Turn(area=area, lang=lang, text=text, person_id=person_id, origin=origin, followup=followup)
         instant = await self._quick(turn)
         if instant is not None:
             _remember(session, text, instant)
@@ -392,6 +414,8 @@ class Coordinator:
         except BrainUnavailable as exc:
             self.house.events.log("ai", "Gemini nicht erreichbar", str(exc)[:200])
             reply = await self._fallback(turn)
+            if followup and not turn.done:
+                return "", []
         if turn.pending is not None:
             session.pending = turn.pending
         elif turn.offer is not None:
@@ -691,6 +715,11 @@ def _remember_model(session: AreaSession, text: str) -> None:
     except ImportError:
         return
     session.history = (list(session.history) + [types.Content(role="model", parts=[types.Part.from_text(text=text)])])[-12:]
+
+
+def _fragment(text: str) -> bool:
+    """One stray word heard after an answer ("Hm", "Na", "Okay"): nothing to act on."""
+    return len(re.findall(r"[a-zäöüß]+", text.lower())) < 2 and quick.parse(text) is None
 
 
 def _offer_answer(text: str) -> confirm.Answer:

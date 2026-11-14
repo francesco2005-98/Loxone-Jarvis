@@ -37,6 +37,8 @@ class Turn:
     text: str
     person_id: str | None = None
     origin: str = ""
+    # Heard without "Jarvis" in the window after an answer; may not be meant for Jarvis at all.
+    followup: bool = False
     pending: Pending | None = None
     offer: Pending | None = None
     final_text: str | None = None

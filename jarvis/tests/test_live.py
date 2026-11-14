@@ -51,9 +51,13 @@ class _Fake:
         self.handled = []
         house.stt.transcribe = lambda pcm, **kw: Transcript(self.texts.pop(0), "de", -0.2, 0.01)
 
-        async def handle_text(session, area, text, lang, person_id, origin=""):
+        async def handle_text(session, area, text, lang, person_id, origin="", followup=False):
             self.handled.append((text, origin))
-            return "Erledigt.", ["Licht an"]
+            self.followups.append(followup)
+            return self.replies.pop(0) if self.replies else "Erledigt.", ["Licht an"]
+
+        self.followups = []
+        self.replies = []
 
         async def render(text, lang, **kw):
             return wav.Pcm(np.zeros(2400, dtype="<i2"), 24000)
@@ -104,6 +108,41 @@ def test_command_in_the_same_breath(house):
 
     run(session._segment(b"\0" * 32000))
     assert fake.handled == [("wie spät ist es", "live")]
+
+
+def test_talk_after_an_answer_that_is_not_for_jarvis_puts_him_to_sleep(house):
+    fake = _Fake(house, ["Jarvis, mach das Licht an", "und dann sind wir nach Hause", "Mach das Licht aus"])
+    fake.replies = ["Erledigt.", ""]
+    session, sent = _session(house)
+
+    async def scenario():
+        await session._segment(b"\0" * 32000)
+        assert session.phase == "followup"
+        session.session.history = ["etwas"]
+        await session._segment(b"\0" * 32000)
+        assert session.phase == "idle" and session.session.history == []
+        await session._segment(b"\0" * 32000)
+
+    run(scenario())
+    assert fake.followups == [False, True], "the third sentence needed the wake word again"
+    assert [m["text"] for m in sent if m["type"] == "reply"] == ["Erledigt."]
+
+
+def test_after_the_conversation_limit_jarvis_needs_his_name_again(house):
+    fake = _Fake(house, ["Jarvis, mach das Licht an"])
+    session, sent = _session(house)
+    house.settings.update({"voice.conversation_s": 15})
+    session.session.clock = lambda: 1000.0
+
+    async def scenario():
+        await session._segment(b"\0" * 32000)
+        assert session.phase == "followup", "right after the wake word follow-ups work"
+        session.session.clock = lambda: 1016.0
+        fake.texts = ["Und im Flur auch"]
+        await session._segment(b"\0" * 32000)
+
+    run(scenario())
+    assert session.phase == "idle", "16 s after the last Jarvis the conversation ends after this answer"
 
 
 def test_sentences_without_wake_word_are_ignored(house):
@@ -242,7 +281,7 @@ def test_recognition_starts_in_the_pause_and_is_reused(house):
     session.until = time.monotonic() + 30
     handled = []
 
-    async def handle(text, lang, pcm):
+    async def handle(text, lang, pcm, followup=False):
         handled.append(text)
 
     session._handle = handle

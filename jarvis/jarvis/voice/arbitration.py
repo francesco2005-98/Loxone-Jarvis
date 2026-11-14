@@ -71,6 +71,15 @@ class AreaSession:
     history: list = field(default_factory=list)
     pending: object | None = None
     suggestion: object | None = None
+    woke_at: float = 0.0
+
+    def woke(self) -> None:
+        """Someone said "Jarvis": the conversation starts (again) now."""
+        self.woke_at = self.clock()
+
+    def keep_talking(self, limit: float) -> bool:
+        """Follow-ups without the wake word: while a question is open or within limit seconds of the last "Jarvis"."""
+        return self.pending is not None or self.clock() - self.woke_at < limit
 
     def offer(self, mic_id: str, wake_word: bool) -> Offer:
         """A board in this Bereich wants to start a run."""
@@ -78,6 +87,7 @@ class AreaSession:
         if self.phase == Phase.IDLE:
             if not wake_word:
                 return Offer.REJECT
+            self.woke()
             self.phase = Phase.COLLECTING
             self.window_started = now
             self.candidates = {mic_id: Candidate(mic_id, now)}
@@ -97,6 +107,7 @@ class AreaSession:
             return Offer.REJECT
         if self.phase == Phase.FOLLOWUP and wake_word:
             # A fresh wake word inside the window starts a normal run.
+            self.woke()
             self.phase = Phase.COLLECTING
             self.window_started = now
             self.candidates = {mic_id: Candidate(mic_id, now)}

@@ -256,6 +256,7 @@ class LiveSession:
         if segment != self.segmenter.count or self.phase != "idle":
             return
         if split_wake(transcript.text)[0]:
+            self.session.woke()
             await self._state("listening", time.monotonic() + UTTERANCE_SECONDS + LISTEN_SECONDS)
 
     async def _render(self, text: str, lang: str) -> tuple[str | None, float]:
@@ -306,7 +307,7 @@ class LiveSession:
             except Exception:  # noqa: BLE001
                 log.exception("live segment failed")
                 await self.send({"type": "error", "text": "Das hat nicht geklappt."})
-                await self._state("idle")
+                await self._end()
 
     async def _segment(self, pcm: bytes, key: tuple[int, int] | None = None) -> None:
         if self.phase == "listening":
@@ -321,6 +322,9 @@ class LiveSession:
         if not transcript.usable:
             return
         woke, rest = split_wake(transcript.text)
+        followup = self.phase == "followup" and not woke
+        if woke:
+            self.session.woke()
         if self.phase == "idle":
             if not woke:
                 return
@@ -334,16 +338,22 @@ class LiveSession:
                 await self._state("listening", time.monotonic() + LISTEN_SECONDS)
                 return
             text = rest if woke else transcript.text
-        await self._handle(text, transcript.lang, pcm)
+        await self._handle(text, transcript.lang, pcm, followup)
 
-    async def _handle(self, text: str, lang: str, pcm: bytes) -> None:
+    async def _handle(self, text: str, lang: str, pcm: bytes, followup: bool = False) -> None:
         house = self.house
         coordinator = house.coordinator
         await self._state("thinking")
-        await self.send({"type": "heard", "text": text})
         started = time.monotonic()
         person_id = await asyncio.to_thread(coordinator._identify, pcm)
-        reply, done = await coordinator.handle_text(self.session, self.area, text, lang, person_id, origin="live")
+        reply, done = await coordinator.handle_text(
+            self.session, self.area, text, lang, person_id, origin="live", followup=followup
+        )
+        if not reply:
+            house.events.log("voice", f"Live, nicht an Jarvis: „{text}“", "Gespräch beendet")
+            await self._end()
+            return
+        await self.send({"type": "heard", "text": text})
         brain_ms = int((time.monotonic() - started) * 1000)
         latency = brain_ms + self._stt_ms
         coordinator.latencies.append(latency)
@@ -377,8 +387,13 @@ class LiveSession:
         seconds = float(self.house.settings.get("voice.followup_s"))
         if self.session.pending is not None:
             seconds = max(seconds, 6.0)
-        if seconds > 0:
+        if seconds > 0 and self.session.keep_talking(float(self.house.settings.get("voice.conversation_s"))):
             await self._state("followup", time.monotonic() + seconds)
         else:
-            self.session.reset()
-            await self._state("idle")
+            await self._end()
+
+    async def _end(self) -> None:
+        """Back to waiting for "Jarvis", with a fresh conversation next time."""
+        self.session.reset()
+        self.segmenter.reset()
+        await self._state("idle")

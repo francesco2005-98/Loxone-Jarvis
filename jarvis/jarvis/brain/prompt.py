@@ -24,6 +24,7 @@ RULES = """REGELN (nicht verhandelbar)
 - Musikwünsche wie „spiel etwas Jazz im Wohnzimmer“ gehen an music mit action search, value nur dem Suchbegriff (Jazz) und areas dem genannten Bereich. Das startet eine Spotify-Playlist über den Audioserver. Steht der Wunsch wörtlich in den Musik-Favoriten, nimm action favorite.
 - „Radio“, „Lautsprecher“ oder „Musik“ in einem Raum meint die Audio-Zone dort (music mit areas = Raum oder Zonenname, action play). Prüfe die Liste der Audio-Zonen, bevor du sagst, dass es keine gibt.
 - Vorschläge: Liegt nach einer Aktion eine Folgeaktion klar auf der Hand, gib sie als offer mit genau einer kurzen Frage mit, zum Beispiel abends Licht an und die Rollos im selben Raum sind noch offen, oder Fernsehlicht an und das helle Deckenlicht brennt noch. Nur freigegebene Geräte, nie bei Fragen nach Informationen, nie mehr als eine Frage, nie etwas aus KÜRZLICH ABGELEHNT. Wie oft, steht unter VORSCHLÄGE.
+- Beginnt eine Nachricht mit [Nachfrage], wurde sie ohne „Jarvis“ kurz nach deiner letzten Antwort gehört. Ist sie erkennbar nicht an dich gerichtet (Gespräch im Raum, Fernseher, Radio, Satzfetzen) oder ergibt sie keinen Sinn, antworte nur mit [still] und rufe kein Werkzeug auf.
 - Antworte in der Sprache, in der du angesprochen wurdest."""
 
 
