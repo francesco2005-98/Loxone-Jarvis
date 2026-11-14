@@ -39,6 +39,8 @@ class Turn:
     origin: str = ""
     # Heard without "Jarvis" in the window after an answer; may not be meant for Jarvis at all.
     followup: bool = False
+    # "Erklär mir ausführlich ...", "Erzähl mir mehr": five or six sentences instead of one or two.
+    detailed: bool = False
     pending: Pending | None = None
     offer: Pending | None = None
     final_text: str | None = None

@@ -91,6 +91,32 @@ def test_a_real_follow_up_is_still_answered(setup):
     assert done and sent[-1][0] == dimmer.uuid, "instant commands work without the wake word"
 
 
+def test_explanations_get_more_sentences_quick_questions_stay_short(setup):
+    from jarvis.brain.gemini import wants_detail
+
+    assert wants_detail("Erklär mir ausführlich, wie Quantenphysik funktioniert")
+    assert wants_detail("Erzähl mir mehr darüber") and wants_detail("Kannst du das genauer erklären?")
+    assert not wants_detail("Wie funktioniert Quantenphysik?") and not wants_detail("Mach das Licht an")
+
+    house, area, dimmer, gate, sent = setup
+    client = FakeClient([call("web_search", query="Quantenphysik"), text("Eine längere Erklärung.")])
+    house.brain._genai = lambda: client
+    session = AreaSession(area.id)
+    reply, _ = run(house.coordinator.handle_text(session, area, "Erklär mir ausführlich, wie Quantenphysik funktioniert", "de", None))
+    assert reply == "Eine längere Erklärung."
+    first, search = client.models.calls
+    assert first["contents"][-1].parts[0].text.startswith("[Ausführlich]")
+    assert "fünf bis sechs" in search["config"].system_instruction
+    assert search["config"].max_output_tokens == 2048
+
+    client = FakeClient([call("web_search", query="Quantenphysik"), text("Kurz gesagt.")])
+    house.brain._genai = lambda: client
+    run(house.coordinator.handle_text(AreaSession(area.id), area, "Wie funktioniert Quantenphysik?", "de", None))
+    first, search = client.models.calls
+    assert "[Ausführlich]" not in first["contents"][-1].parts[0].text
+    assert "höchstens zwei" in search["config"].system_instruction
+
+
 def test_free_sentence_switches_and_critical_waits_for_yes(setup):
     house, area, dimmer, gate, sent = setup
     client = FakeClient(

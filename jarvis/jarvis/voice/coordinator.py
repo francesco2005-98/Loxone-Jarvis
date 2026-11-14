@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from ..areas import Area
 from ..brain import confirm, fallback, quick, when
-from ..brain.gemini import BrainUnavailable
+from ..brain.gemini import BrainUnavailable, wants_detail
 from ..brain.tools import Pending, Turn
 from ..people import ENROLL_SENTENCES
 from ..settings import ANREDE_LABELS
@@ -401,7 +401,9 @@ class Coordinator:
             else:
                 session.pending = pending
         session.suggestion = None
-        turn = Turn(area=area, lang=lang, text=text, person_id=person_id, origin=origin, followup=followup)
+        turn = Turn(
+            area=area, lang=lang, text=text, person_id=person_id, origin=origin, followup=followup, detailed=wants_detail(text)
+        )
         instant = await self._quick(turn)
         if instant is not None:
             _remember(session, text, instant)

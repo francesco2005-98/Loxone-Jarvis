@@ -22,9 +22,20 @@ log = logging.getLogger(__name__)
 
 MAX_STEPS = 6
 HISTORY_ITEMS = 12
-# See the [Nachfrage] rule in prompt.RULES.
+# See the [Nachfrage] and [Ausführlich] rules in prompt.RULES.
 FOLLOWUP_TAG = "[Nachfrage]"
+DETAIL_TAG = "[Ausführlich]"
 SILENT = "[still]"
+_DETAIL = re.compile(
+    r"\b(ausführlich\w*|genauer|detailliert\w*|im detail|erklär\w*|erzähl\w* (?:mir |uns )?(?:mehr|alles|etwas über|was über)"
+    r"|mehr (?:dazu|darüber|davon)|tell me more|explain|in detail)\b",
+    re.IGNORECASE,
+)
+
+
+def wants_detail(text: str) -> bool:
+    """The speaker asks for an explanation rather than a quick answer."""
+    return bool(_DETAIL.search(text or ""))
 REQUEST_TIMEOUT_MS = 25000
 # A warm HTTPS connection saves DNS and the TLS handshake on every sentence after a pause.
 WARM_SECONDS = 45
@@ -123,7 +134,7 @@ class Brain:
         }[wanted]
         return types.ThinkingConfig(thinking_level=level)
 
-    def _config(self, system: str, declarations: list[dict] | None = None, search: bool = False):
+    def _config(self, system: str, declarations: list[dict] | None = None, search: bool = False, long: bool = False):
         from google.genai import types
 
         tools = []
@@ -136,7 +147,7 @@ class Brain:
             tools=tools or None,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             thinking_config=self._thinking(),
-            max_output_tokens=1024,
+            max_output_tokens=2048 if long else 1024,
         )
 
     async def generate(self, contents: list, config) -> Any:
@@ -293,9 +304,10 @@ class Brain:
         config_available = self.house.mcp.configured
         system = self.system_for(turn, config_available)
         declarations = self.runner.declarations(config_available)
-        config = self._config(system, declarations)
+        config = self._config(system, declarations, long=turn.detailed)
         contents = list(history[-HISTORY_ITEMS:])
-        said = f"{FOLLOWUP_TAG} {turn.text}" if turn.followup else turn.text
+        tags = [tag for tag, on in ((FOLLOWUP_TAG, turn.followup), (DETAIL_TAG, turn.detailed)) if on]
+        said = " ".join([*tags, turn.text])
         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=said)]))
         text = ""
         for _ in range(MAX_STEPS):
@@ -390,10 +402,16 @@ class Brain:
         from google.genai import types
 
         lang = "Deutsch" if turn.lang == "de" else "English"
+        length = (
+            "in fünf bis sechs gesprochenen Sätzen, verständlich und anschaulich wie ein guter Erklärer, "
+            "mit dem Wichtigsten zuerst"
+            if turn.detailed
+            else "in höchstens zwei gesprochenen Sätzen"
+        )
         system = (
             self.house.settings.get("gemini.system_prompt")
-            + f"\nBeantworte die Frage mit der Google-Suche, auf {lang}, in höchstens zwei gesprochenen Sätzen. "
-            "Keine Quellenangaben, keine URLs, kein Markdown. Jetzt ist "
+            + f"\nBeantworte die Frage mit der Google-Suche, auf {lang}, {length}. "
+            "Keine Aufzählungen, keine Quellenangaben, keine URLs, kein Markdown. Jetzt ist "
             + datetime.now(self.house.settings.tz).strftime("%d.%m.%Y %H:%M")
             + "."
         )
@@ -402,7 +420,7 @@ class Brain:
             system += f" Das Haus steht hier: {where}. Fragen ohne Ort (Wetter, Öffnungszeiten, Verkehr) beziehen sich darauf."
         response = await self.generate(
             [types.Content(role="user", parts=[types.Part.from_text(text=query)])],
-            self._config(system, search=True),
+            self._config(system, search=True, long=turn.detailed),
         )
         return (response.text or "").strip() or ("Dazu finde ich nichts." if turn.lang == "de" else "I found nothing on that.")
 
