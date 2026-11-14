@@ -14,16 +14,16 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # Models are baked in so the running container never downloads anything.
-# german: primeline/whisper-large-v3-turbo-german via TheTobyB's CTranslate2 conversion, Apache-2.0.
-# The tokenizer is the unchanged Whisper tokenizer, stored beside the weights for offline use.
+# Kroko: German streaming Zipformer by Banafo, CC-BY-SA community model, https://huggingface.co/Banafo/Kroko-ASR
 ARG WHISPER_MODELS="small base"
-ARG WHISPER_GERMAN_REV=6c16f621da45f94b2b4787c2585a682940beef8f
-ARG WHISPER_TOKENIZER_REV=41f01f3fe87f28c78e2fbf8b568835947dd65ed9
-RUN mkdir -p /models/whisper/german /models/speaker \
+ARG KROKO_MODEL=sherpa-onnx-streaming-zipformer-de-kroko-2025-08-06
+ARG KROKO_SHA256=9e27b783c20e67b0d0f13a258c1861fce199917c969d9176a438bee38df64962
+RUN mkdir -p /models/whisper /models/speaker /models/kroko \
  && python -c "import os; from huggingface_hub import snapshot_download; [snapshot_download(f'Systran/faster-whisper-{m}', local_dir=f'/models/whisper/{m}', allow_patterns=['config.json', 'preprocessor_config.json', 'model.bin', 'tokenizer.json', 'vocabulary.*']) for m in os.environ['WHISPER_MODELS'].split()]" \
- && python -c "from huggingface_hub import snapshot_download; snapshot_download('TheTobyB/whisper-large-v3-turbo-german-ct2', local_dir='/models/whisper/german', revision='${WHISPER_GERMAN_REV}', allow_patterns=['config.json', 'preprocessor_config.json', 'model.bin', 'vocabulary.json'])" \
- && curl -fsSL -A "Mozilla/5.0" --retry 3 -o /models/whisper/german/tokenizer.json \
-    "https://huggingface.co/openai/whisper-large-v3-turbo/resolve/${WHISPER_TOKENIZER_REV}/tokenizer.json" \
+ && curl -fsSL --retry 3 -o /tmp/kroko.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${KROKO_MODEL}.tar.bz2" \
+ && echo "${KROKO_SHA256}  /tmp/kroko.tar.bz2" | sha256sum -c - \
+ && python -c "import tarfile, shutil, os; t = tarfile.open('/tmp/kroko.tar.bz2'); t.extractall('/tmp/kroko', filter='data'); src = '/tmp/kroko/${KROKO_MODEL}'; [shutil.copy(os.path.join(src, f), '/models/kroko/' + f) for f in ('encoder.onnx', 'decoder.onnx', 'joiner.onnx', 'tokens.txt')]" \
+ && rm -rf /tmp/kroko /tmp/kroko.tar.bz2 \
  && curl -fsSL --retry 3 -o /models/speaker/wespeaker_en_voxceleb_resnet34_LM.onnx \
     https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx \
  && chmod -R a+rX /models

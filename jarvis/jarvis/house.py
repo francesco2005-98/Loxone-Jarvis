@@ -33,6 +33,7 @@ from .usage import Usage
 from .voice.coordinator import Coordinator
 from .voice.mics import MicManager
 from .voice.speaker import SpeakerRecognizer
+from .voice.live import early_model
 from .voice.stt import Recognizer
 
 log = logging.getLogger(__name__)
@@ -84,11 +85,15 @@ class House:
         self.timers.start(self._timer_due)
         await self.mics.start()
         self.background(self._housekeeping(), "housekeeping")
-        self.background(asyncio.to_thread(self.stt.preload, self.settings.get("stt.model")), "stt-preload")
+        self._preload_recognition()
         self.background(self._warm_voices(), "voice-warmup")
         self.background(self.brain.keep_warm(), "gemini-warm")
         self.background(self.refresh_phrases(), "phrases")
-        self.background(asyncio.to_thread(self.stt.preload, "base"), "stt-preload-base")
+
+    def _preload_recognition(self) -> None:
+        model = self.settings.get("stt.model")
+        for name in dict.fromkeys([model, early_model(model)]):
+            self.background(asyncio.to_thread(self.stt.preload, name), f"stt-preload-{name}")
 
     async def _warm_voices(self, attempts: int = 10) -> None:
         """Piper loads a voice on first use; doing that now keeps it out of the first answer."""
@@ -146,7 +151,7 @@ class House:
         if keys & {"voice.de", "voice.en"}:
             self.background(self._warm_voices(attempts=1), "voice-warmup")
         if "stt.model" in keys:
-            self.background(asyncio.to_thread(self.stt.preload, self.settings.get("stt.model")), "stt-preload")
+            self._preload_recognition()
 
     async def refresh_phrases(self, force: bool = False) -> bool:
         """Let Gemini word the instant answers in the current personality; keeps the old book on failure."""

@@ -341,14 +341,21 @@ def test_old_lead_silence_follows_the_new_default(house):
     assert Settings(house.db).get("announce.silence_ms") == 800
 
 
-def test_old_recognition_model_moves_to_german_once(house):
+def test_earlier_recognition_defaults_move_to_kroko_once(house):
+    from jarvis.db import dumps
     from jarvis.settings import Settings
 
-    house.db.execute("DELETE FROM settings WHERE key = ?", ("stt.upgraded",))
-    house.settings.update({"stt.model": "small"})
+    def stored(model, upgraded):
+        house.db.execute("DELETE FROM settings WHERE key IN ('stt.model', 'stt.upgraded')")
+        house.db.execute("INSERT INTO settings(key, value) VALUES(?, ?)", ("stt.model", dumps(model)))
+        if upgraded is not None:
+            house.db.execute("INSERT INTO settings(key, value) VALUES(?, ?)", ("stt.upgraded", dumps(upgraded)))
+        return Settings(house.db).get("stt.model")
+
+    assert stored("small", None) == "kroko", "the old default"
+    assert stored("german", True) == "kroko", "the slow German Whisper is gone"
+    assert stored("small", True) == "small", "small chosen after the first upgrade stays"
+    assert stored("base", None) == "base"
     upgraded = Settings(house.db)
-    assert upgraded.get("stt.model") == "german"
     upgraded.update({"stt.model": "small"})
-    assert Settings(house.db).get("stt.model") == "small"
-    house.settings.update({"stt.model": "base"})
-    assert Settings(house.db).get("stt.model") == "base"
+    assert Settings(house.db).get("stt.model") == "small", "a choice after this upgrade stays"

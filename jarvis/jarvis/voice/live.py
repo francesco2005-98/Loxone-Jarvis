@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-import re
 import time
 from collections import deque
 from typing import TYPE_CHECKING, Awaitable, Callable
@@ -20,7 +19,9 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 from ..areas import Area
 from ..audio import wav
 from .arbitration import AreaSession
+from .stt import KROKO
 from .vad import FRAME_BYTES, Endpointer, VadConfig, high_pass
+from .wake import WAKE
 
 if TYPE_CHECKING:
     from ..house import House
@@ -30,19 +31,17 @@ log = logging.getLogger(__name__)
 LISTEN_SECONDS = 8.0
 MAX_BACKLOG = 2
 PREROLL_FRAMES = 10
-# While a sentence is still running, the start is checked for the wake word with the small model,
+# While a sentence is still running, the start is checked for the wake word,
 # so the device can show "listening" before the speaker has finished.
 EARLY_CHECKS_MS = (700, 1400)
-EARLY_MODEL = "base"
 SPECULATE_MS = 250
 UTTERANCE_SECONDS = 12.0
-
-# Spellings Whisper produces for "Jarvis" in German and English speech.
-WAKE = re.compile(
-    r"\b(jarvis|jarviz|jarwis|jarvi|jarves|javis|jervis|dschawis|dschavis|dschaavis|tschawis|tschavis|chavis)\b",
-    re.IGNORECASE,
-)
 WAKE_LEAD = 24
+
+
+def early_model(model: str) -> str:
+    """Kroko is fast enough for the early check; with Whisper the small base model does it."""
+    return KROKO if model == KROKO else "base"
 
 
 def split_wake(text: str) -> tuple[bool, str]:
@@ -125,6 +124,15 @@ class Segmenter:
                     done.append((segment, key))
         return done
 
+    def cut(self) -> tuple[bytes, tuple[int, int]] | None:
+        """End the running sentence now, as if the pause had been long enough."""
+        if not self.speaking or not self._audio:
+            return None
+        self._noise = self._endpointer._noise
+        item = (bytes(self._audio), self.key)
+        self.reset()
+        return item
+
 
 class LiveSession:
     """One browser in Live mode."""
@@ -169,11 +177,14 @@ class LiveSession:
             return
         self.segmenter.config.end_silence_ms = int(self.house.settings.get("voice.end_silence_ms"))
         for item in self.segmenter.feed(data):
-            while self.queue.qsize() >= MAX_BACKLOG:
-                self.queue.get_nowait()
-            self.queue.put_nowait(item)
+            self._enqueue(item)
         self._maybe_early()
         self._speculate()
+
+    def _enqueue(self, item: tuple[bytes, tuple[int, int]]) -> None:
+        while self.queue.qsize() >= MAX_BACKLOG:
+            self.queue.get_nowait()
+        self.queue.put_nowait(item)
 
     def _speculate(self) -> None:
         """Start recognition on a short pause; the result is used if the pause ends the sentence."""
@@ -184,7 +195,24 @@ class LiveSession:
             self._spec[1].cancel()
             self._spec = None
         if self._spec is None and seg.silence_ms >= SPECULATE_MS:
-            self._spec = (seg.key, asyncio.ensure_future(self._transcribe(seg.audio())))
+            key = seg.key
+            future = asyncio.ensure_future(self._transcribe(seg.audio()))
+            self._spec = (key, future)
+            future.add_done_callback(lambda done, key=key: self._maybe_cut(key, done))
+
+    def _maybe_cut(self, key: tuple[int, int], done: asyncio.Future) -> None:
+        """A finished instant command needs no longer pause: answer right away."""
+        if done.cancelled() or done.exception() is not None:
+            return
+        seg = self.segmenter
+        if seg.key != key or not seg.speaking or self.phase in ("thinking", "speaking"):
+            return
+        transcript = done.result()
+        if not transcript.usable or not self.house.coordinator.complete(transcript.text, self.session):
+            return
+        item = seg.cut()
+        if item is not None:
+            self._enqueue(item)
 
     async def _transcribe(self, pcm: bytes):
         house = self.house
@@ -216,10 +244,9 @@ class LiveSession:
             transcript = await asyncio.to_thread(
                 house.stt.transcribe,
                 high_pass(pcm, int(house.settings.get("mic.noise_filter"))),
-                model=EARLY_MODEL,
+                model=early_model(house.settings.get("stt.model")),
                 language=language if language in ("de", "en") else "de",
                 prompt="Jarvis",
-                fast=True,
             )
         except Exception:  # noqa: BLE001
             log.debug("early wake check failed", exc_info=True)

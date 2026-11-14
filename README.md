@@ -3,7 +3,7 @@
 Sprachassistent mit Jarvis-Persönlichkeit für ein Loxone-Haus. Wakeword-Mikrofone in den Räumen, freie Sätze für das ganze Haus, Antwort als Durchsage über den Loxone Audioserver. Ein Repo, eine Coolify-Anwendung, laufende Kosten nur bei Google (Gemini).
 
 - **Hören:** Seeed XIAO ESP32-S3 Sense mit „Jarvis“ auf dem Board. Erst der Satz danach geht an Jarvis.
-- **Verstehen:** Spracherkennung lokal mit einem deutschen Whisper-large-v3-turbo (Apache-2.0, Feintuning von Florian Zimmermeister). Kurze deutsche Sätze werden nicht mehr als Englisch gelesen, leise Aufnahmen werden angehoben, und Namen des Hauses sowie „Jarvis“ und „Spotify“ werden nachgezogen, wenn sie nur knapp daneben lagen. Auf der Mikrofonseite bleiben „small“ und „base“, falls der Rechner das genauere Modell nicht tragen soll. Zu Google geht nur der erkannte Text.
+- **Verstehen:** Spracherkennung lokal mit Kroko, einem deutschen Streaming-Modell von [Banafo](https://huggingface.co/Banafo/Kroko-ASR) (CC-BY-SA). Ein Befehl braucht auf vier Kernen rund 0,1 s statt 1,4 s mit Whisper small, und auf Raumaufnahmen verhört sich Kroko nur halb so oft. Namen des Hauses sowie „Jarvis“ und „Spotify“ werden nachgezogen, wenn sie knapp daneben lagen. Ist ein Sofortbefehl schon in der ersten kurzen Pause vollständig, wartet Jarvis das Satzende nicht ab. Whisper small („wie bisher“) und base bleiben auf der Mikrofonseite wählbar. Zu Google geht nur der erkannte Text.
 - **Denken:** Gemini (Standard `gemini-3.8-flash`, im Drop-down wählbar) mit den freigegebenen Bausteinen. Google-Suche nur bei offenen Fragen.
 - **Handeln:** Miniserver über die Websocket-Schnittstelle, nur freigegebene Bausteine. Alarm, Schloss und Garage erst nach gesprochenem „Ja“. „Spiel Jazz im Wohnzimmer“ sucht am Audioserver eine Spotify-Playlist und startet sie in der Zone. Spotify muss dort angemeldet sein.
 - **Sprechen:** Piper lokal, als Durchsage über den Audioserver. Musik läuft danach weiter.
@@ -31,7 +31,7 @@ Daten liegen im Volume `jarvis-data` (SQLite). Zugangsdaten sind dort mit AES-GC
 1. Neue Ressource → **Docker Compose** → dieses GitHub-Repo, Branch `main`, Datei `docker-compose.yml`.
 2. Umgebungsvariable `JARVIS_SECRET_KEY` als Secret setzen, zum Beispiel aus `openssl rand -base64 48`. Den Wert aufbewahren: ohne ihn lassen sich die gespeicherten Zugänge nicht mehr entschlüsseln.
 3. Keine Domain nötig. Nach dem Deploy die Oberfläche im Hausnetz unter `http://<IP-des-Servers>:8500` öffnen. Pair über USB funktioniert dort ebenfalls.
-4. Deployen. Der erste Bau lädt Whisper-Modelle, das Sprechermodell und die Piper-Stimmen in die Images (einige Minuten, danach braucht der Betrieb kein Internet außer Gemini).
+4. Deployen. Der erste Bau lädt die Erkennungsmodelle (Kroko und Whisper), das Sprechermodell und die Piper-Stimmen in die Images (einige Minuten, danach braucht der Betrieb kein Internet außer Gemini).
 5. Die Seite öffnen und das Oberflächen-Passwort festlegen (mindestens 10 Zeichen).
 
 Jarvis antwortet nur Adressen aus privaten Netzen, auch hinter dem Coolify-Proxy. Keine Portweiterleitung im Router einrichten. Wer zusätzlich sperren will: ausgehend nur `generativelanguage.googleapis.com` erlauben.

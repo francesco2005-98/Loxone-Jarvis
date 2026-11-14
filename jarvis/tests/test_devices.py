@@ -163,6 +163,22 @@ def test_blinds_up_and_down_are_not_confused():
     assert quick.parse("Fahr die Rollos im Wohnzimmer ganz zu").room == "wohnzimmer"
 
 
+def test_kroko_wording_is_understood():
+    assert quick.parse("Dimm das Licht in der Küche auf dreißig Prozent.").value == 30
+    assert quick.parse("dimm das licht auf fünfundsiebzig prozent").value == 75
+    assert quick.parse("Dimm das Licht auf hundert Prozent").value == 100
+    assert quick.parse("Dimm das Licht auf 40 %").value == 40
+    assert quick.parse("schaltet das Licht im Schlafzimmer aus.").action == "off"
+    assert quick.parse("macht die Rollos im Wohnzimmer runter").action == "down"
+    assert quick.parse("Javas, mach das Licht im Esszimmer an").room == "esszimmer"
+    assert quick.parse("Erinnere mich um achtzehn Uhr daran, den Müll rauszubringen").clock == "achtzehn uhr"
+    assert quick.parse("Stell mir einen Timer in einer Stunde, da ist das Essen fertig").value == 3600
+    assert quick.parse("Bimm das Licht in der Küche auf dreißig Prozent").value == 30
+    assert quick.parse("Fahrdi Rollos im Wohnzimmer runter").action == "down"
+    assert quick.parse("die Rolllos im Wohnzimmer runter").action == "down"
+    assert quick.parse("Ja, wis macht das Licht im Esszimmer an").room == "esszimmer"
+
+
 def test_rgb_scene_state_is_shown(home):
     house, _, e = home
     rgb = next(iter(e.values()))

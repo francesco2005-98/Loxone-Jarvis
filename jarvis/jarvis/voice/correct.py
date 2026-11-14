@@ -27,7 +27,7 @@ _KEEP = {
     "vielleicht", "etwas", "alles", "diese", "dieser", "dieses",
     "oder", "aber", "denn", "weil", "dass", "wenn", "dann", "hier", "dort",
     "oben", "unten", "links", "rechts", "mach", "mache", "schalt", "schalte",
-    "fahr", "fahre", "stell", "stelle", "dimm", "dimme",
+    "fahr", "fahre", "stell", "stelle", "dimm", "dimme", "nach", "ach",
 }
 _WORD = re.compile(r"[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-]*")
 
@@ -138,6 +138,21 @@ def _join(first: str, second: str, entries: list[tuple[str, str, str]]) -> str |
     if _distance(_sound(joined), _sound(fixed), 1) > 1:
         return None
     return fixed
+
+
+def closest(word: str, candidates: tuple[str, ...], limit: int = 2) -> str | None:
+    """The one candidate a short command word clearly sounds like ("Bimm" -> "dimm"), else None."""
+    fold = _fold(word)
+    if len(fold) < 3 or fold in _KEEP or fold in candidates:
+        return None
+    sound = _sound(word)
+    ranked = sorted((_distance(sound, _sound(c), limit), c) for c in candidates)
+    best = ranked[0]
+    if best[0] > limit or best[0] / len(sound) >= 0.5:
+        return None
+    if len(ranked) > 1 and ranked[1][0] == best[0]:
+        return None
+    return best[1]
 
 
 def correct(text: str, house) -> str:

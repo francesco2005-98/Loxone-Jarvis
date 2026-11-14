@@ -168,8 +168,27 @@ class Coordinator:
             run.spec.cancel()
             run.spec = None
         if run.spec is None and ep.silence_ms >= SPECULATE_MS:
-            run.spec_anchor = ep.last_speech_ms
+            anchor = run.spec_anchor = ep.last_speech_ms
             run.spec = asyncio.ensure_future(self._transcribe(bytes(run.audio)))
+            run.spec.add_done_callback(lambda done, run=run, anchor=anchor: self._maybe_finish(run, anchor, done))
+
+    def _maybe_finish(self, run: Run, anchor: int, done: asyncio.Future) -> None:
+        """A finished instant command needs no longer pause: answer right away."""
+        if done.cancelled() or done.exception() is not None:
+            return
+        if run.state != "listening" or run.spec is not done or run.endpointer.last_speech_ms != anchor:
+            return
+        _, transcript = done.result()
+        session = self.sessions.get(run.area_id) if run.area_id else None
+        if transcript.usable and self.complete(transcript.text, session):
+            self._finish(run, "end")
+
+    def complete(self, text: str, session: AreaSession | None = None) -> bool:
+        """True when the words so far already form an instant command or a yes/no answer."""
+        text = correct(text, self.house)
+        if session is not None and session.pending is not None and confirm.classify(text) != confirm.Answer.UNCLEAR:
+            return True
+        return quick.parse(text) is not None
 
     async def _transcribe(self, audio: bytes):
         house = self.house
@@ -252,7 +271,7 @@ class Coordinator:
             name = (name or "").strip()
             if name and name not in seen:
                 seen.append(name)
-        return ", ".join(seen)[:240]
+        return ", ".join(seen)[:400]
 
     def _identify(self, pcm: bytes) -> str | None:
         recognizer = self.house.speaker

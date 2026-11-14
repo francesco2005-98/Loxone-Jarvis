@@ -14,9 +14,9 @@ const LANGS = [
   { value: "en", label: "English" },
 ];
 const STT = [
-  { value: "german", label: "Deutsch · deutlich genauer" },
-  { value: "small", label: "small · schneller" },
-  { value: "base", label: "base · am schnellsten" },
+  { value: "kroko", label: "Kroko · schnell und genau" },
+  { value: "small", label: "Whisper small · wie bisher" },
+  { value: "base", label: "Whisper base · leichter" },
 ];
 const BARS = 96;
 
@@ -62,7 +62,7 @@ export default function micsPage(view, ctx) {
   // -------------------------------------------------------- voice config
   const lang = selectEl(LANGS, "auto");
   const noise = selectEl(NOISE, 2);
-  const stt = selectEl(STT, "german");
+  const stt = selectEl(STT, "kroko");
   const sens = h("input", { type: "range", min: "0", max: "100", step: "1" });
   const sensLabel = h("span", { class: "gold-text" }, "");
   const vol = h("input", { type: "range", min: "0", max: "100", step: "1" });

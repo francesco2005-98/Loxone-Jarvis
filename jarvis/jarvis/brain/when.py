@@ -12,7 +12,10 @@ _ONES = {
     "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
     "nine": 9, "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
 }
-_TENS = {"zwanzig": 20, "dreißig": 30, "dreissig": 30, "vierzig": 40, "fünfzig": 50, "sechzig": 60}
+_TENS = {
+    "zwanzig": 20, "dreißig": 30, "dreissig": 30, "vierzig": 40, "fünfzig": 50, "sechzig": 60,
+    "siebzig": 70, "achtzig": 80, "neunzig": 90, "hundert": 100, "einhundert": 100,
+}
 _FRACTIONS = {"anderthalb": 1.5, "eineinhalb": 1.5, "halb": 0.5, "halbe": 0.5, "halben": 0.5, "half": 0.5}
 UNITS = {
     "sekunde": 1, "sekunden": 1, "sek": 1, "second": 1, "seconds": 1,
@@ -32,7 +35,7 @@ def word_number(word: str) -> float | None:
         return float(_TENS[word])
     if word in _FRACTIONS:
         return _FRACTIONS[word]
-    match = re.fullmatch(r"(\w+?)und(zwanzig|dreißig|dreissig|vierzig|fünfzig)", word)
+    match = re.fullmatch(r"(\w+?)und(zwanzig|dreißig|dreissig|vierzig|fünfzig|sechzig|siebzig|achtzig|neunzig)", word)
     if match and match.group(1) in _ONES:
         return float(_ONES[match.group(1)] + _TENS[match.group(2)])
     return None

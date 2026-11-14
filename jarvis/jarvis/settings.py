@@ -34,6 +34,9 @@ LEGACY_PERSONAS = (
 
 ANREDE_LABELS = {"sir": "Sir", "mam": "Ma'am"}
 
+# Bumped when the recognition default moves; see Settings._upgrade_recognition.
+RECOGNITION_VERSION = 2
+
 # Stored values that still equal an earlier default follow the current default.
 LEGACY_DEFAULTS: dict[str, tuple] = {
     "gemini.system_prompt": LEGACY_PERSONAS,
@@ -132,7 +135,7 @@ FIELDS: dict[str, Field] = {
     "voice.de": Field("de_DE-thorsten-high", _str(80, VOICE)),
     "voice.en": Field("en_GB-alan-medium", _str(80, VOICE)),
     "voice.speed": Field(1.0, _float(0.7, 1.4)),
-    "stt.model": Field("german", _choice("german", "small", "base")),
+    "stt.model": Field("kroko", _choice("kroko", "small", "base")),
     "stt.language": Field("auto", _choice("auto", "de", "en")),
     "mic.noise_filter": Field(2, _int(0, 4)),
     "mic.sensitivity": Field(50, _int(0, 100)),
@@ -183,20 +186,24 @@ class Settings:
         self._listeners: list[Callable[[set[str]], None]] = []
 
     def _upgrade_recognition(self) -> None:
-        """The old default model was small. Move that once to the German model; a later choice of small stays."""
-        if "stt.upgraded" in self._cache:
+        """Move the earlier defaults (small, then the slow German Whisper) once to Kroko.
+
+        A choice of small made after the first upgrade stays.
+        """
+        version = self._cache.get("stt.upgraded")
+        if version == RECOGNITION_VERSION:
             return
-        if self._cache.get("stt.model") == "small":
-            self._db.execute(
-                "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                ("stt.model", dumps("german")),
-            )
-            self._cache["stt.model"] = "german"
+        model = self._cache.get("stt.model")
+        if model == "german" or (version is None and model == "small"):
+            self._store("stt.model", "kroko")
+        self._store("stt.upgraded", RECOGNITION_VERSION)
+
+    def _store(self, key: str, value: Any) -> None:
         self._db.execute(
             "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            ("stt.upgraded", dumps(True)),
+            (key, dumps(value)),
         )
-        self._cache["stt.upgraded"] = True
+        self._cache[key] = value
 
     def get(self, key: str) -> Any:
         if key in self._cache:

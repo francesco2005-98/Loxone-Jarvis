@@ -23,6 +23,14 @@ def test_wake_word_and_rest_are_split():
     assert split_wake("Ich habe gestern mit dem Nachbarn über Jarvis gesprochen") == (False, "")
 
 
+def test_near_misses_of_the_wake_word_still_wake():
+    for heard in ("Javas, mach das Licht an.", "Jervus, mach das Licht an", "Jahwest mach das Licht an",
+                  "Dervis, mach das Licht an", "Ja, wis mach das Licht an", "Javace! Mach das Licht an"):
+        assert split_wake(heard) == (True, "mach das Licht an" if "Mach" not in heard else "Mach das Licht an"), heard
+    for plain in ("Ja, wie spät ist es?", "Ja, was machen wir heute?", "Das Wasser ist warm", "Jawohl, mach ich"):
+        assert split_wake(plain)[0] is False, plain
+
+
 def _tone(seconds, amplitude):
     t = np.arange(int(16000 * seconds)) / 16000
     return (np.sin(2 * np.pi * 220 * t) * amplitude).astype("<i2").tobytes()
@@ -216,7 +224,7 @@ def test_wake_word_is_noticed_while_still_speaking(house):
             await asyncio.sleep(0.01)
 
     run(scenario())
-    assert models[0] == "base"
+    assert models[0] == "kroko"
     assert {"type": "state", "phase": "listening"} in sent
     assert session.queue.empty(), "the sentence is still running"
 
@@ -250,5 +258,60 @@ def test_recognition_starts_in_the_pause_and_is_reused(house):
         await session._segment(segment, key)
 
     run(scenario())
-    assert calls.count("german") == 1, "the speculative result was used, no second pass"
+    assert calls.count("kroko") == 1, "the speculative result was used, no second pass"
     assert handled == ["Wie spät ist es"]
+
+
+def _pause_then(house, text):
+    house.stt.transcribe = lambda pcm, **kw: Transcript(text, "de", -0.2, 0.0)
+    session, _ = _session(house)
+    session.phase = "listening"
+    session.until = time.monotonic() + 30
+
+    async def scenario():
+        session.feed(_tone(0.5, 20))
+        session.feed(_tone(1.0, 8000))
+        session.feed(_tone(0.3, 20))
+        await asyncio.sleep(0.05)
+        return session.queue.qsize()
+
+    return run(scenario())
+
+
+def test_a_complete_instant_command_does_not_wait_for_the_full_pause(house):
+    assert _pause_then(house, "Mach das Licht im Wohnzimmer an") == 1, "cut after 0.3 s instead of 0.55 s"
+
+
+def test_an_unfinished_sentence_waits_for_the_pause(house):
+    assert _pause_then(house, "Mach das Licht im") == 0
+    assert _pause_then(house, "Erzähl mir etwas über") == 0
+
+
+def test_room_microphones_know_when_a_sentence_is_complete(house):
+    from jarvis.brain.tools import Pending
+    from jarvis.voice.arbitration import AreaSession
+
+    coordinator = house.coordinator
+    assert coordinator.complete("Javas, mach das Licht im Wohnzimmer an")
+    assert coordinator.complete("Dimm das Licht auf dreißig Prozent")
+    assert not coordinator.complete("Mach das Licht im")
+    session = AreaSession("a")
+    assert not coordinator.complete("Ja", session)
+    session.pending = Pending("control", "Tor öffnen?", [])
+    assert coordinator.complete("Ja", session), "a yes to an open question needs no longer pause"
+
+
+def test_repeated_answers_are_spoken_from_memory(house):
+    calls = []
+
+    async def post(payload):
+        calls.append(payload["text"])
+        return b"RIFF" + payload["text"].encode()
+
+    house.piper._post = post
+    first = run(house.piper.synthesize("Sehr wohl.", "de"))
+    assert run(house.piper.synthesize("Sehr wohl.", "de")) == first
+    assert calls == ["Sehr wohl."]
+    house.settings.update({"voice.speed": 1.2})
+    run(house.piper.synthesize("Sehr wohl.", "de"))
+    assert len(calls) == 2, "another speed is another recording"

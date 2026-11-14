@@ -15,7 +15,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ..loxone.catalog import ACTIONS
-from .when import parse_duration
+from ..voice.correct import closest
+from ..voice.wake import WAKE_WORD
+from .when import parse_duration, word_number
 
 if TYPE_CHECKING:
     from ..areas import Area
@@ -24,15 +26,19 @@ if TYPE_CHECKING:
     from ..loxone.catalog import Entry
 
 _LIGHT = r"(?:das |die |den )?(?:licht|lichter|lampe|lampen|beleuchtung)"
-_SHADE = r"(?:die |den |das )?(?:rollo|rollos|rollladen|rolladen|rollläden|jalousie|jalousien|raffstore|raffstores|beschattung)"
+_SHADE = r"(?:die |den |das )?(?:rollo|rollos|rolllo|rolllos|rollladen|rolladen|rollläden|jalousie|jalousien|raffstore|raffstores|beschattung)"
+# A misheard first word ("Bimm", "Fahrdi") is read as the command verb it sounds like.
+_COMMAND_VERBS = ("schalte", "mach", "fahr", "dimm", "stell")
 _PREP = r"(?P<prep>im|in der|in dem|in|auf der|auf dem|am|beim)"
 _ROOM = r"(?P<room>[a-zäöüß][a-zäöüß0-9\- ]{1,40}?)"
-_VERB = r"(?:(?:schalte|schalt|mach|mache)(?: mal)? )?(?:bitte )?"
-_MOVE = r"(?:(?:fahr|fahre|mach|mache)(?: mal)? )?(?:bitte )?"
-_DIMV = r"(?:(?:dimm|dimme|mach|mache|stell|stelle|schalte)(?: mal)? )?(?:bitte )?"
+# Recognition sometimes hears "macht" or "schaltet" for the spoken imperative.
+_VERB = r"(?:(?:schalte|schalt|schaltet|mach|mache|macht)(?: mal)? )?(?:bitte )?"
+_MOVE = r"(?:(?:fahr|fahre|fahrt|mach|mache|macht)(?: mal)? )?(?:bitte )?"
+_DIMV = r"(?:(?:dimm|dimme|dimmt|mach|mache|macht|stell|stelle|stellt|schalte|schaltet)(?: mal)? )?(?:bitte )?"
 _STATE = r"(?P<state>an|ein|aus|anschalten|einschalten|ausschalten|anmachen|ausmachen)"
 _SHADE_STATE = r"(?P<state>hoch|rauf|ganz auf|ganz zu|auf|öffnen|runter|herunter|zu|schließen)(?: fahren)?"
-_VALUE = r"(?P<value>\d{1,3}) ?(?:prozent|%)?"
+# Digits from Whisper, words ("dreißig Prozent") from Kroko.
+_VALUE = r"(?P<value>\d{1,3}|[a-zäöüß]+) ?(?:prozent|%)?"
 _END = r"(?: bitte)?"
 _DEVICE = r"(?P<device>(?:das |die |den |der )?[a-zäöüß][a-zäöüß0-9\- ]{2,60}?)"
 _SPOT = r"(?: (?:am|an der|an dem|beim|bei der|über dem|über der|neben dem|neben der|hinter dem|hinter der) (?P<spot>[a-zäöüß0-9\- ]{2,30}?))?"
@@ -72,7 +78,7 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     ("date", re.compile(r"^(?:what day is it|what's the date|what is the date)(?: today)?$")),
 ]
 
-_WAKE = re.compile(r"^(?:(?:hey|hallo|ok|okay) )?(?:jarvis|dschawis|javis)\b ?")
+_WAKE = re.compile(rf"^(?:(?:hey|hallo|ok|okay) )?{WAKE_WORD}\b ?")
 _ON = {"an", "ein", "anschalten", "einschalten", "anmachen", "on"}
 _UP = {"hoch", "rauf", "auf", "ganz auf", "öffnen"}
 _DEVICE_KINDS = {"light": "light", "dim": "light", "shade": "shading", "kind": "light", "named": "light", "mood": "light"}
@@ -104,6 +110,16 @@ def _norm(text: str) -> str:
 
 def parse(text: str) -> QuickCommand | None:
     sentence = _WAKE.sub("", _norm(text)).strip()
+    found = _parse_sentence(sentence)
+    if found is None:
+        first, _, rest = sentence.partition(" ")
+        verb = closest(first, _COMMAND_VERBS) if rest else None
+        if verb:
+            found = _parse_sentence(f"{verb} {rest}")
+    return found
+
+
+def _parse_sentence(sentence: str) -> QuickCommand | None:
     for kind, pattern in PATTERNS:
         match = pattern.match(sentence)
         if not match:
@@ -123,7 +139,10 @@ def parse(text: str) -> QuickCommand | None:
         if kind == "temp":
             return QuickCommand("temp", room, groups.get("prep"), "temp", device="outside" if groups.get("outside") else None)
         if kind == "dim":
-            value = int(groups["value"])
+            number = word_number(groups["value"])
+            if number is None or number != int(number):
+                continue
+            value = int(number)
             if value > 100:
                 return None
             return QuickCommand("dim", room, groups.get("prep"), "dim", value)
