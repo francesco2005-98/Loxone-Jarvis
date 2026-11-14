@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+import unicodedata
 from collections import deque
 from typing import Any, Callable
 
@@ -249,7 +250,8 @@ class MiniserverClient:
 
     async def _load_structure(self) -> None:
         text = await self._request("data/LoxAPP3.json", timeout=90.0)
-        data = json.loads(text)
+        # Names typed on some systems arrive with decomposed umlauts; matching and speech expect "ü".
+        data = json.loads(unicodedata.normalize("NFC", text))
         self.raw_structure = data
         self.structure = parse(data)
         self.catalog.sync(self.structure)

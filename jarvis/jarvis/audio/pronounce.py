@@ -14,6 +14,7 @@ names use the German letter names.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 # Whole words only. Plurals ("Apps", "Meetings", "Storys") and the possessive
 # "Sir's" add the plural sound inside the marker. "Tipps" is not "tip",
@@ -200,6 +201,9 @@ _HYPHENATED: dict[str, str] = {
 _VOICELESS = set("ptkfθ")
 _SIBILANT = set("szʃʒ")
 
+# Soft hyphen and zero-width characters split a word for espeak.
+_INVISIBLE = dict.fromkeys(map(ord, "\u00ad\u200b\u200c\u200d\u2060\ufeff"))
+
 _BLOCK = re.compile(r"\[\[[^\]]*\]\]")
 _WORD = re.compile(r"[A-Za-zÄÖÜäöüß']+")
 # A mark glued to the following comma or period swallows the next word.
@@ -212,9 +216,15 @@ _HYPHEN_RE = re.compile(
 
 def pronounce(text: str, lang: str) -> str:
     """Rewrite German speech so known English words keep their sound."""
+    text = compose(text)
     if lang == "en" or not text:
         return text
     return _separate(_join(_BLOCK.split(text), _BLOCK.findall(text), _apply))
+
+
+def compose(text: str) -> str:
+    """Umlauts as single letters. espeak reads a decomposed "ü" (u plus dots) as "u"."""
+    return unicodedata.normalize("NFC", text or "").translate(_INVISIBLE)
 
 
 def _separate(text: str) -> str:

@@ -91,7 +91,7 @@ def _entries(house) -> list[tuple[str, str, str]]:
     out: list[tuple[str, str, str]] = []
     seen: set[str] = set()
     for name in _names(house):
-        for word in _WORD.findall(name or ""):
+        for word in _WORD.findall(unicodedata.normalize("NFC", name or "")):
             folded = _fold(word)
             if len(folded) >= MIN_LENGTH and folded not in seen:
                 seen.add(folded)
@@ -156,6 +156,7 @@ def closest(word: str, candidates: tuple[str, ...], limit: int = 2) -> str | Non
 
 
 def correct(text: str, house) -> str:
+    text = unicodedata.normalize("NFC", text)
     entries = _entries(house)
     if not entries:
         return text

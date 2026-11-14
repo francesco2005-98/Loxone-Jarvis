@@ -163,6 +163,17 @@ def test_blinds_up_and_down_are_not_confused():
     assert quick.parse("Fahr die Rollos im Wohnzimmer ganz zu").room == "wohnzimmer"
 
 
+def test_decomposed_house_names_still_match(home):
+    import unicodedata
+
+    from jarvis.voice.correct import correct
+
+    house, area, _ = home
+    house.areas.update(area.id, rooms=[unicodedata.normalize("NFD", "Küche"), "Esszimmer"])
+    assert correct("Licht in der Kueche an", house) == "Licht in der Küche an"
+    assert correct(unicodedata.normalize("NFD", "Licht in der Küche an"), house) == "Licht in der Küche an"
+
+
 def test_kroko_wording_is_understood():
     assert quick.parse("Dimm das Licht in der Küche auf dreißig Prozent.").value == 30
     assert quick.parse("dimm das licht auf fünfundsiebzig prozent").value == 75

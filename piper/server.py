@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import threading
+import unicodedata
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -132,7 +133,8 @@ class Handler(BaseHTTPRequestHandler):
             if length > 64 * 1024:
                 raise ValueError("request too large")
             body = json.loads(self.rfile.read(length) or b"{}")
-            text = str(body.get("text", "")).strip()
+            # espeak reads a decomposed umlaut ("u" plus combining dots) as the bare vowel.
+            text = unicodedata.normalize("NFC", str(body.get("text", ""))).strip()
             voice_id = str(body.get("voice", ""))
             scale = float(body.get("length_scale", 1.0))
             if not text or len(text) > MAX_TEXT:

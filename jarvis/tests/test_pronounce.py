@@ -1,3 +1,5 @@
+import unicodedata
+
 from jarvis.audio.pronounce import _ENGLISH, _HYPHENATED, clip, pronounce
 
 # German words and loanwords Piper already says properly. None of these may change.
@@ -10,6 +12,14 @@ _UNCHANGED = (
     "Dieses alles und etwas Neues, nichts rechts, abends, muss, dass, Haus und Eis. "
     "WLAN, TV und PC bleiben. Gesetz und Installation und Apparat und Popmusik."
 )
+
+
+def test_decomposed_umlauts_are_joined_for_the_voice():
+    decomposed = unicodedata.normalize("NFD", "Licht in der Küche, schön, über, Käse, Grüße.")
+    assert decomposed != "Licht in der Küche, schön, über, Käse, Grüße."
+    assert pronounce(decomposed, "de") == "Licht in der Küche, schön, über, Käse, Grüße."
+    assert pronounce(decomposed, "en") == "Licht in der Küche, schön, über, Käse, Grüße."
+    assert pronounce("Rollläden im Bü\u00adro", "de") == "Rollläden im Büro", "a soft hyphen splits the word"
 
 
 def test_english_words_keep_their_sound_in_german():
