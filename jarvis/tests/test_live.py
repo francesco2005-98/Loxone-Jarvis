@@ -311,7 +311,9 @@ def _pause_then(house, text):
         session.feed(_tone(0.5, 20))
         session.feed(_tone(1.0, 8000))
         session.feed(_tone(0.3, 20))
-        await asyncio.sleep(0.05)
+        assert session._spec is not None
+        await session._spec[1]
+        await asyncio.sleep(0)
         return session.queue.qsize()
 
     return run(scenario())
