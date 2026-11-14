@@ -77,7 +77,7 @@ def test_refresh_needs_a_key(house):
 def test_tuning_settings_reach_voice_and_brain(house):
     house.settings.update({"voice.end_silence_ms": 900, "brain.thinking": "high", "gemini.model": "gemini-3.8-flash"})
     assert house.coordinator._vad(2).end_silence_ms == 900
-    assert VadConfig.for_noise_filter(2).end_silence_ms == 550
+    assert VadConfig.for_noise_filter(2).end_silence_ms == 400
     assert house.brain._thinking().thinking_level == types.ThinkingLevel.HIGH
     house.settings.update({"brain.thinking": "minimal", "gemini.model": "gemini-3.8-pro"})
     assert house.brain._thinking().thinking_level == types.ThinkingLevel.LOW, "Pro has no minimal level"

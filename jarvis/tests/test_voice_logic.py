@@ -101,6 +101,25 @@ def test_endpointer_detects_end_and_timeout():
     assert quiet.feed(tone(1.2, 20)) == "timeout"
 
 
+def test_one_loud_frame_does_not_hold_the_microphone_open():
+    ep = Endpointer(VadConfig(end_silence_ms=550))
+    assert ep.feed(tone(0.30, 30)) == "continue"
+    assert ep.feed(tone(0.39, 9000)) == "continue"
+    assert ep.feed(tone(0.39, 20)) == "continue"
+    assert ep.feed(tone(0.03, 9000)) == "continue"
+    assert ep.feed(tone(0.21, 20)) == "end"
+
+
+def test_a_second_word_restarts_the_pause():
+    ep = Endpointer(VadConfig(end_silence_ms=550))
+    ep.feed(tone(0.30, 30))
+    ep.feed(tone(0.39, 9000))
+    ep.feed(tone(0.39, 20))
+    ep.feed(tone(0.06, 9000))
+    assert ep.feed(tone(0.39, 20)) == "continue"
+    assert ep.feed(tone(0.21, 20)) == "end"
+
+
 def test_confirmation_words():
     assert confirm.classify("Ja") == confirm.Answer.YES
     assert confirm.classify("Ja, bitte.") == confirm.Answer.YES
@@ -132,3 +151,36 @@ def test_speaker_identification_is_conservative():
     assert identify(norm(base + rng.normal(scale=0.3, size=256)), profiles).person_id == "luca"
     stranger = norm(rng.normal(size=256))
     assert identify(stranger, profiles).person_id is None
+
+
+def _mic(mic_id, area_id):
+    from jarvis.voice.mics import Mic
+
+    return Mic(mic_id, f"jarvis-mic-{mic_id}", "Mikrofon", "aa:bb:cc:dd:ee:ff", None, area_id, None, None)
+
+
+def test_one_microphone_starts_listening_immediately(house):
+    import asyncio
+
+    area = house.areas.create("Wohnen")
+    mic = _mic("m1", area.id)
+    house.mics.mics[mic.id] = mic
+    asyncio.run(house.coordinator.on_start(mic, "conv", "jarvis"))
+    assert house.coordinator.runs["m1"].state == "listening"
+
+
+def test_two_microphones_still_compare_for_a_moment(house):
+    import asyncio
+
+    area = house.areas.create("Wohnen")
+    first, second = _mic("m1", area.id), _mic("m2", area.id)
+    house.mics.mics[first.id] = first
+    house.mics.mics[second.id] = second
+
+    async def go():
+        await house.coordinator.on_start(first, "conv", "jarvis")
+        assert house.coordinator.runs["m1"].state == "collecting"
+        await asyncio.sleep(ARBITRATION_WINDOW + 0.05)
+        assert house.coordinator.runs["m1"].state == "listening"
+
+    asyncio.run(go())

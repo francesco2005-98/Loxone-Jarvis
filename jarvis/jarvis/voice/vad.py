@@ -30,12 +30,12 @@ class VadConfig:
     margin_db: float = 9.0
     floor_dbfs: float = -52.0
     start_frames: int = 3
-    end_silence_ms: int = 550
+    end_silence_ms: int = 400
     no_speech_timeout_ms: int = 5000
     max_utterance_ms: int = 12000
 
     @classmethod
-    def for_noise_filter(cls, level: int, followup: bool = False, end_silence_ms: int = 550) -> "VadConfig":
+    def for_noise_filter(cls, level: int, followup: bool = False, end_silence_ms: int = 400) -> "VadConfig":
         level = max(0, min(4, level))
         return cls(
             margin_db=7.0 + 1.5 * level,
@@ -54,6 +54,7 @@ class Endpointer:
         self._buffer = b""
         self._noise: float | None = None
         self._speech_run = 0
+        self._loud_run = 0
         self._silence_ms = 0
         self._elapsed_ms = 0
         self.speech_started = False
@@ -98,9 +99,14 @@ class Endpointer:
             if not self.speech_started and self._elapsed_ms >= cfg.no_speech_timeout_ms:
                 return "timeout"
         else:
+            # One loud frame in a pause is room noise. It must not restart the wait,
+            # or a crackle keeps the board streaming for the whole utterance limit.
             if is_speech:
-                self._silence_ms = 0
+                self._loud_run += 1
+                if self._loud_run >= 2:
+                    self._silence_ms = 0
             else:
+                self._loud_run = 0
                 self._silence_ms += FRAME_MS
                 if self._silence_ms >= cfg.end_silence_ms:
                     return "end"

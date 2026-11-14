@@ -41,6 +41,7 @@ RECOGNITION_VERSION = 2
 LEGACY_DEFAULTS: dict[str, tuple] = {
     "gemini.system_prompt": LEGACY_PERSONAS,
     "announce.silence_ms": (600,),
+    "voice.end_silence_ms": (550,),
 }
 
 
@@ -141,7 +142,7 @@ FIELDS: dict[str, Field] = {
     "mic.sensitivity": Field(50, _int(0, 100)),
     "announce.volume": Field(0, _int(0, 100)),
     "announce.silence_ms": Field(300, _int(0, 2000)),
-    "voice.end_silence_ms": Field(550, _int(300, 1500)),
+    "voice.end_silence_ms": Field(400, _int(300, 1500)),
     "voice.speculative": Field(True, _bool),
     "voice.followup_s": Field(8, _int(0, 20)),
     "voice.conversation_s": Field(60, _int(15, 300)),

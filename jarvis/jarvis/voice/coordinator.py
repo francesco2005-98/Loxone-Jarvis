@@ -135,7 +135,10 @@ class Coordinator:
         else:
             self.runs[mic.id] = Run(mic, mic.area_id, "command", Endpointer(self._vad(noise)))
             mics.send(mic, "RUN_START")
-            if len(session.candidates) == 1:
+            if len(mics.in_area(mic.area_id)) <= 1:
+                # Nothing to compare. Waiting out the arbitration window only delays the sentence.
+                self._decide(mic.area_id)
+            elif len(session.candidates) == 1:
                 area_id = mic.area_id
                 asyncio.get_running_loop().call_later(ARBITRATION_WINDOW, self._decide, area_id)
         self._phase(mic.area_id)
@@ -292,9 +295,18 @@ class Coordinator:
         self._phase(run.area_id)
         started = time.monotonic()
         try:
+            found: dict[str, str | None] = {}
+
+            def _keep(task: asyncio.Task, found: dict = found) -> None:
+                try:
+                    found["id"] = task.result()
+                except Exception:  # noqa: BLE001
+                    found["id"] = None
+
             who = asyncio.ensure_future(
                 asyncio.to_thread(self._identify, high_pass(audio, int(house.settings.get("mic.noise_filter"))))
             )
+            who.add_done_callback(_keep)
             if run.spec is not None and run.spec_anchor == run.endpointer.last_speech_ms:
                 pcm, transcript = await run.spec
             else:
@@ -308,7 +320,9 @@ class Coordinator:
             if area is None or not transcript.usable:
                 session.reset()
                 return
-            person_id = await who
+            # The reply does not wait for speaker recognition. A name that is already
+            # known is used; otherwise the answer stays neutral.
+            person_id = found.get("id")
             brain_started = time.monotonic()
             followup = run.kind == "followup"
             reply, done = await self.handle_text(session, area, transcript.text, transcript.lang, person_id, followup=followup)
