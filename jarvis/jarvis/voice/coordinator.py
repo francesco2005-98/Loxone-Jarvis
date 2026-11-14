@@ -239,16 +239,20 @@ class Coordinator:
 
     # ------------------------------------------------------------ process
     def _stt_prompt(self) -> str:
-        names = ["Jarvis"]
-        names += [a.name for a in self.house.areas.list()]
+        """Names Whisper may lean on: areas and rooms first, then devices."""
+        ordered = ["Jarvis"]
+        for area in self.house.areas.list():
+            ordered.append(area.name)
+            ordered.extend(area.rooms)
         for entry in self.house.catalog.entries(only_allowed=True):
-            names.append(entry.name)
-            names.extend(entry.aliases)
+            ordered.append(entry.name)
+            ordered.extend(entry.aliases)
         seen: list[str] = []
-        for name in names:
+        for name in ordered:
+            name = (name or "").strip()
             if name and name not in seen:
                 seen.append(name)
-        return ", ".join(seen)[:400]
+        return ", ".join(seen)[:240]
 
     def _identify(self, pcm: bytes) -> str | None:
         recognizer = self.house.speaker

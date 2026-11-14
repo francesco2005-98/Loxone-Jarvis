@@ -3,7 +3,7 @@
 Sprachassistent mit Jarvis-Persönlichkeit für ein Loxone-Haus. Wakeword-Mikrofone in den Räumen, freie Sätze für das ganze Haus, Antwort als Durchsage über den Loxone Audioserver. Ein Repo, eine Coolify-Anwendung, laufende Kosten nur bei Google (Gemini).
 
 - **Hören:** Seeed XIAO ESP32-S3 Sense mit „Jarvis“ auf dem Board. Erst der Satz danach geht an Jarvis.
-- **Verstehen:** Spracherkennung lokal (faster-whisper). Zu Google geht nur der erkannte Text.
+- **Verstehen:** Spracherkennung lokal mit einem deutschen Whisper-large-v3-turbo (Apache-2.0, Feintuning von Florian Zimmermeister). Kurze deutsche Sätze werden nicht mehr als Englisch gelesen, leise Aufnahmen werden angehoben, und Namen des Hauses sowie „Jarvis“ und „Spotify“ werden nachgezogen, wenn sie nur knapp daneben lagen. Auf der Mikrofonseite bleiben „small“ und „base“, falls der Rechner das genauere Modell nicht tragen soll. Zu Google geht nur der erkannte Text.
 - **Denken:** Gemini (Standard `gemini-3.8-flash`, im Drop-down wählbar) mit den freigegebenen Bausteinen. Google-Suche nur bei offenen Fragen.
 - **Handeln:** Miniserver über die Websocket-Schnittstelle, nur freigegebene Bausteine. Alarm, Schloss und Garage erst nach gesprochenem „Ja“. „Spiel Jazz im Wohnzimmer“ sucht am Audioserver eine Spotify-Playlist und startet sie in der Zone. Spotify muss dort angemeldet sein.
 - **Sprechen:** Piper lokal, als Durchsage über den Audioserver. Musik läuft danach weiter.

@@ -339,3 +339,16 @@ def test_old_lead_silence_follows_the_new_default(house):
     assert Settings(house.db).get("announce.silence_ms") == 300
     house.settings.update({"announce.silence_ms": 800})
     assert Settings(house.db).get("announce.silence_ms") == 800
+
+
+def test_old_recognition_model_moves_to_german_once(house):
+    from jarvis.settings import Settings
+
+    house.db.execute("DELETE FROM settings WHERE key = ?", ("stt.upgraded",))
+    house.settings.update({"stt.model": "small"})
+    upgraded = Settings(house.db)
+    assert upgraded.get("stt.model") == "german"
+    upgraded.update({"stt.model": "small"})
+    assert Settings(house.db).get("stt.model") == "small"
+    house.settings.update({"stt.model": "base"})
+    assert Settings(house.db).get("stt.model") == "base"

@@ -250,5 +250,5 @@ def test_recognition_starts_in_the_pause_and_is_reused(house):
         await session._segment(segment, key)
 
     run(scenario())
-    assert calls.count("small") == 1, "the speculative result was used, no second pass"
+    assert calls.count("german") == 1, "the speculative result was used, no second pass"
     assert handled == ["Wie spät ist es"]

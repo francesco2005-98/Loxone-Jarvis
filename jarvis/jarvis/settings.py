@@ -132,7 +132,7 @@ FIELDS: dict[str, Field] = {
     "voice.de": Field("de_DE-thorsten-high", _str(80, VOICE)),
     "voice.en": Field("en_GB-alan-medium", _str(80, VOICE)),
     "voice.speed": Field(1.0, _float(0.7, 1.4)),
-    "stt.model": Field("small", _choice("small", "base")),
+    "stt.model": Field("german", _choice("german", "small", "base")),
     "stt.language": Field("auto", _choice("auto", "de", "en")),
     "mic.noise_filter": Field(2, _int(0, 4)),
     "mic.sensitivity": Field(50, _int(0, 100)),
@@ -179,7 +179,24 @@ class Settings:
             if key in self._cache and self._cache[key] in old:
                 db.execute("DELETE FROM settings WHERE key = ?", (key,))
                 del self._cache[key]
+        self._upgrade_recognition()
         self._listeners: list[Callable[[set[str]], None]] = []
+
+    def _upgrade_recognition(self) -> None:
+        """The old default model was small. Move that once to the German model; a later choice of small stays."""
+        if "stt.upgraded" in self._cache:
+            return
+        if self._cache.get("stt.model") == "small":
+            self._db.execute(
+                "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                ("stt.model", dumps("german")),
+            )
+            self._cache["stt.model"] = "german"
+        self._db.execute(
+            "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("stt.upgraded", dumps(True)),
+        )
+        self._cache["stt.upgraded"] = True
 
     def get(self, key: str) -> Any:
         if key in self._cache:

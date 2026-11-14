@@ -192,7 +192,7 @@ def test_a_critical_question_survives_an_unclear_answer(home):
 
 def test_misheard_room_names_are_corrected(home):
     house, area, _ = home
-    house.areas.update(area.id, rooms=["Schlafzimmer", "Esszimmer", "Wohnzimmer"])
+    house.areas.update(area.id, rooms=["Schlafzimmer", "Esszimmer", "Wohnzimmer", "Küche", "Büro"])
     from jarvis.voice.correct import correct
 
     assert correct("Mach das Licht im Cafzimmer an", house) == "Mach das Licht im Schlafzimmer an"
@@ -200,3 +200,9 @@ def test_misheard_room_names_are_corrected(home):
     assert correct("im Schlafzimmer", house) == "im Schlafzimmer", "a correct name stays"
     assert correct("im Bad", house) == "im Bad", "short unknown words stay"
     assert correct("Mach das Licht im Keller an", house) == "Mach das Licht im Keller an", "a real other room is not rewritten"
+    assert correct("Mach das Licht im Wohn Zimmer an", house) == "Mach das Licht im Wohnzimmer an"
+    assert correct("Licht in der Kueche an", house) == "Licht in der Küche an"
+    assert correct("Licht im Buro aus", house) == "Licht im Büro aus"
+    assert correct("Fahr die Rollos im Wohnzimmer runter", house) == "Fahr die Rollos im Wohnzimmer runter"
+    assert correct("das Licht nicht im Keller", house) == "das Licht nicht im Keller"
+    assert correct("Jarwis, spiel Spotifi", house) == "Jarvis, spiel Spotify"

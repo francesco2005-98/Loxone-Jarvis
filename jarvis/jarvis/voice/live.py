@@ -219,6 +219,7 @@ class LiveSession:
                 model=EARLY_MODEL,
                 language=language if language in ("de", "en") else "de",
                 prompt="Jarvis",
+                fast=True,
             )
         except Exception:  # noqa: BLE001
             log.debug("early wake check failed", exc_info=True)
