@@ -58,7 +58,7 @@ class House:
         self.catalog = Catalog(self.db)
         self.miniserver = MiniserverClient(self.settings, self.secrets, self.catalog, self.events)
         self.audioserver = Audioservers(self.settings, self.miniserver, self.events)
-        self.piper = Piper(config.piper_url, self.settings)
+        self.piper = Piper(config.piper_url, self.settings, cache_dir=config.data_dir / "tts-cache")
         self.stt = Recognizer(config.models_dir)
         self.speaker = SpeakerRecognizer(config.models_dir / "speaker" / "wespeaker_en_voxceleb_resnet34_LM.onnx")
         self.mcp = ConfigMcp(self.settings)

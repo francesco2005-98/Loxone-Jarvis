@@ -395,8 +395,11 @@ class Coordinator:
             if reply:
                 session.start_speaking()
                 spoke_at = time.monotonic()
+                house.speech.last_timing = {}
                 await house.speech.say(reply, transcript.lang, [area])
                 self.last["timing"]["voice"] = house.speech.last_voice_ms
+                self.last["timing"].update(house.speech.last_timing)
+                house.events.publish({"type": "utterance", "utterance": self.last})
                 if house.speech.interrupted_since(area.id, spoke_at):
                     # The new sentence after "Jarvis" owns the Bereich now.
                     return
@@ -598,6 +601,9 @@ class Coordinator:
         if not entries:
             return None
         value = command.scene or (str(command.value) if command.value is not None else None)
+        confirmation = quick.reply(command, room, turn.lang, anrede, True, book)
+        # The voice is synthesized while the Miniserver switches.
+        self.house.piper.prerender(confirmation, turn.lang)
         ok = True
         for entry in entries:
             try:
@@ -606,7 +612,7 @@ class Coordinator:
             except Exception:  # noqa: BLE001
                 log.exception("quick command failed")
                 ok = False
-        return quick.reply(command, room, turn.lang, anrede, ok, book)
+        return confirmation if ok else quick.reply(command, room, turn.lang, anrede, False, book)
 
     def _quick_timer(self, turn: Turn, command: quick.QuickCommand, anrede: str | None) -> str | None:
         house = self.house

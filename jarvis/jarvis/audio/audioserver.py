@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
 import re
+import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -36,6 +38,7 @@ log = logging.getLogger(__name__)
 
 PORT = 7091
 UPLOAD_RATE = 24000
+UPLOADED_LIMIT = 5000
 
 
 class AudioserverError(RuntimeError):
@@ -50,6 +53,7 @@ class Announcement:
     ended: set[int] = field(default_factory=set)
     began: asyncio.Event = field(default_factory=asyncio.Event)
     finished: asyncio.Event = field(default_factory=asyncio.Event)
+    upload_ms: int = 0
 
     def mark_end(self, player: int) -> None:
         if player in self.players:
@@ -86,6 +90,8 @@ class AudioserverClient:
         self._announcements: dict[str, Announcement] = {}
         self._event_active: dict[int, bool] = {}
         self._music: dict[int, bool] = {}
+        self._uploaded: set[str] = set()
+        self._http: aiohttp.ClientSession | None = None
         self._listeners: list[Callable[[int, bool], None]] = []
         self._task: asyncio.Task | None = None
         self._kick = asyncio.Event()
@@ -104,6 +110,9 @@ class AudioserverClient:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        if self._http is not None:
+            await self._http.close()
+            self._http = None
 
     def reconnect(self) -> None:
         self._kick.set()
@@ -296,30 +305,65 @@ class AudioserverClient:
             raise AudioserverError(self.error or "Audioserver nicht verbunden") from exc
 
     async def announce(self, targets: list[tuple[int, int]], wav: bytes) -> Announcement:
-        """Play WAV (mono, 24 kHz) as announcement on (player_id, volume) targets."""
+        """Play WAV (mono, 24 kHz) as announcement on (player_id, volume) targets.
+
+        The file is named after its content. A sentence the server already has
+        ("Sehr wohl, Sir.") plays without another upload.
+        """
         await self.ensure_ready()
-        host = self.host()
-        filename = f"jarvis-{uuid.uuid4().hex[:16]}.wav"
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout) as http:
-            async with http.put(
-                f"http://{host}:{PORT}/audio/cfg/upload/audioupload/add/{filename}",
-                data=wav,
-                headers={"Content-Type": "audio/wav", "Accept-Encoding": "identity"},
-            ) as resp:
-                if resp.status // 100 != 2:
-                    raise AudioserverError(f"Upload abgelehnt ({resp.status})")
-                await resp.content.read(1024)
+        filename = f"jarvis-{hashlib.sha256(wav).hexdigest()[:20]}.wav"
+        if filename in self._announcements:
+            # The same words are still playing elsewhere; their end must not end this one.
+            filename = f"jarvis-{uuid.uuid4().hex[:20]}.wav"
+        started = time.monotonic()
+        fresh = filename not in self._uploaded
+        if fresh:
+            await self._upload(filename, wav)
         announcement = Announcement(filename, {pid for pid, _ in targets})
+        announcement.upload_ms = int((time.monotonic() - started) * 1000)
         self._announcements[filename] = announcement
-        for player, volume in targets:
+        try:
+            await self._play(filename, targets)
+        except AudioserverError:
+            if fresh:
+                self._announcements.pop(filename, None)
+                raise
+            # The server no longer has the file (restart, cleanup): upload it once more.
+            self._uploaded.discard(filename)
+            await self._upload(filename, wav)
+            await self._play(filename, targets)
+        return announcement
+
+    async def _upload(self, filename: str, wav: bytes) -> None:
+        url = f"http://{self.host()}:{PORT}/audio/cfg/upload/audioupload/add/{filename}"
+        headers = {"Content-Type": "audio/wav", "Accept-Encoding": "identity"}
+        for attempt in (1, 2):
+            if self._http is None or self._http.closed:
+                self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
+            try:
+                async with self._http.put(url, data=wav, headers=headers) as resp:
+                    if resp.status // 100 != 2:
+                        raise AudioserverError(f"Upload abgelehnt ({resp.status})")
+                    await resp.content.read(1024)
+                break
+            except aiohttp.ClientConnectionError:
+                # A kept-alive connection the server has closed meanwhile.
+                if attempt == 2:
+                    raise
+        if len(self._uploaded) >= UPLOADED_LIMIT:
+            self._uploaded.clear()
+        self._uploaded.add(filename)
+
+    async def _play(self, filename: str, targets: list[tuple[int, int]]) -> None:
+        async def one(player: int, volume: int) -> None:
             volume = max(1, min(100, int(volume)))
             result = await self._command(
                 f"audio/grouped/playuploadedfile/{filename}/{player}#{volume}", "playuploadedfile_result"
             )
             if result is not True:
                 raise AudioserverError(f"Ansage in Zone {player} nicht bestätigt")
-        return announcement
+
+        await asyncio.gather(*(one(player, volume) for player, volume in targets))
 
     async def favorites(self, player: int) -> list[dict]:
         await self.ensure_ready()
@@ -562,6 +606,7 @@ class Audioservers:
         if len(parts) == 1:
             return parts[0]
         combined = Announcement("", set().union(*(part.players for part in parts)))
+        combined.upload_ms = max(part.upload_ms for part in parts)
         asyncio.create_task(_join(parts, combined))
         return combined
 

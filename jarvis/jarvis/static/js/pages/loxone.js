@@ -195,7 +195,8 @@ export default function loxonePage(view, ctx) {
     utterResult.replaceChildren(pill(last.actions && last.actions.length ? "Ausgeführt" : "Beantwortet", "live"));
     const t = last.timing || {};
     const sec = (ms) => `${(ms / 1000).toLocaleString("de-DE", { maximumFractionDigits: 1, minimumFractionDigits: 1 })} s`;
-    const parts = [["Erkennung", t.stt], ["KI", t.brain], ["Stimme", t.voice]].filter(([, ms]) => typeof ms === "number").map(([label, ms]) => `${label} ${sec(ms)}`);
+    const voice = typeof t.tts === "number" ? [["Stimme", t.tts], ["Audioserver", t.server]] : [["Stimme", t.voice]];
+    const parts = [["Erkennung", t.stt], ["KI", t.brain], ...voice].filter(([, ms]) => typeof ms === "number").map(([label, ms]) => `${label} ${sec(ms)}`);
     utterMeta.textContent = `${last.area} · ${last.actions && last.actions.length ? last.actions.join(", ") : last.reply} · ${parts.length ? parts.join(" · ") : `${last.ms} ms`}`;
   }
 

@@ -27,6 +27,7 @@ class Speech:
         self._interrupted_at: dict[str, float] = {}
         self.last_start_latency: float | None = None
         self.last_voice_ms: int | None = None
+        self.last_timing: dict[str, int] = {}
 
     async def render(self, text: str, lang: str, lead_ms: int | None = None) -> wav.Pcm:
         """Lead silence protects the first syllable on the Audioserver; a browser plays it right away."""
@@ -88,8 +89,14 @@ class Speech:
             announcement = await self.house.audioserver.announce(targets, wav.encode(pcm))
             try:
                 if await _until(announcement.began, cut, 4.0):
-                    self.last_start_latency = time.monotonic() - started
-                    self.last_voice_ms = int((time.monotonic() - render_started) * 1000)
+                    began = time.monotonic()
+                    self.last_start_latency = began - started
+                    self.last_voice_ms = int((began - render_started) * 1000)
+                    self.last_timing = {
+                        "tts": int((started - render_started) * 1000),
+                        "upload": announcement.upload_ms,
+                        "server": int((began - started) * 1000),
+                    }
                     await _until(announcement.finished, cut, pcm.duration + 5.0)
             except asyncio.TimeoutError:
                 remaining = pcm.duration + 1.0 - (time.monotonic() - started)

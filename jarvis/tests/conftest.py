@@ -21,6 +21,8 @@ def house(env):
     from jarvis.house import House
 
     instance = House(Config.from_env())
+    # No piper container in tests; a background synthesis would outlive the test loop.
+    instance.piper.prerender = lambda text, lang: None
     yield instance
     instance.db.close()
 
