@@ -1,4 +1,4 @@
-"""Speak a reply in one or more Bereiche, with their microphones muted meanwhile."""
+"""Speak a reply in one or more Bereiche. Saying "Jarvis" meanwhile cuts it off."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ class Speech:
     def __init__(self, house: "House"):
         self.house = house
         self._locks: dict[str, asyncio.Lock] = {}
+        self._cuts: dict[str, asyncio.Event] = {}
+        self._interrupted_at: dict[str, float] = {}
         self.last_start_latency: float | None = None
         self.last_voice_ms: int | None = None
 
@@ -43,6 +45,18 @@ class Speech:
         except (TypeError, ValueError):
             return 40
 
+    def interrupt(self, area_id: str) -> bool:
+        """Stop waiting for the running answer in this Bereich. True if one was running."""
+        self._interrupted_at[area_id] = time.monotonic()
+        cut = self._cuts.get(area_id)
+        if cut is None:
+            return False
+        cut.set()
+        return True
+
+    def interrupted_since(self, area_id: str, moment: float) -> bool:
+        return self._interrupted_at.get(area_id, float("-inf")) >= moment
+
     async def say(self, text: str, lang: str, areas: list[Area]) -> bool:
         """Returns True when the Audioserver confirmed the announcement."""
         targets: list[tuple[int, int]] = []
@@ -60,30 +74,59 @@ class Speech:
         for lock in locks:
             await lock.acquire()
         coordinator = self.house.coordinator
+        cut = asyncio.Event()
+        for area in speaking:
+            self._cuts[area.id] = cut
         try:
             render_started = time.monotonic()
             pcm = await self.render(text, lang)
+            if cut.is_set():
+                return False
             for area in speaking:
-                coordinator.set_speaking(area.id, True)
+                coordinator.set_speaking(area.id, True, text)
             started = time.monotonic()
             announcement = await self.house.audioserver.announce(targets, wav.encode(pcm))
             try:
-                await asyncio.wait_for(announcement.began.wait(), timeout=4.0)
-                self.last_start_latency = time.monotonic() - started
-                self.last_voice_ms = int((time.monotonic() - render_started) * 1000)
-                await asyncio.wait_for(announcement.finished.wait(), timeout=pcm.duration + 5.0)
+                if await _until(announcement.began, cut, 4.0):
+                    self.last_start_latency = time.monotonic() - started
+                    self.last_voice_ms = int((time.monotonic() - render_started) * 1000)
+                    await _until(announcement.finished, cut, pcm.duration + 5.0)
             except asyncio.TimeoutError:
                 remaining = pcm.duration + 1.0 - (time.monotonic() - started)
                 if remaining > 0:
-                    await asyncio.sleep(remaining)
+                    try:
+                        await asyncio.wait_for(cut.wait(), timeout=remaining)
+                    except asyncio.TimeoutError:
+                        pass
+            if cut.is_set() and not announcement.finished.is_set():
+                self.house.background(self.house.audioserver.cut(announcement), "cut announcement")
             return True
         except Exception as exc:  # noqa: BLE001
             log.warning("announcement failed: %s", exc)
             self.house.events.log("audio", "Ansage fehlgeschlagen", str(exc)[:200])
             return False
         finally:
-            await asyncio.sleep(UNMUTE_DELAY)
+            for area in speaking:
+                if self._cuts.get(area.id) is cut:
+                    del self._cuts[area.id]
+            if not cut.is_set():
+                await asyncio.sleep(UNMUTE_DELAY)
             for area in speaking:
                 coordinator.set_speaking(area.id, False)
             for lock in locks:
                 lock.release()
+
+
+async def _until(event: asyncio.Event, cut: asyncio.Event, timeout: float) -> bool:
+    """Wait for event, unless cut comes first. True when event fired; raises TimeoutError otherwise."""
+    if event.is_set():
+        return True
+    waiters = [asyncio.ensure_future(event.wait()), asyncio.ensure_future(cut.wait())]
+    try:
+        done, _ = await asyncio.wait(waiters, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for waiter in waiters:
+            waiter.cancel()
+    if not done:
+        raise asyncio.TimeoutError
+    return event.is_set()

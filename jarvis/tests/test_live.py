@@ -334,8 +334,11 @@ def test_room_microphones_know_when_a_sentence_is_complete(house):
 
     coordinator = house.coordinator
     assert coordinator.complete("Javas, mach das Licht im Wohnzimmer an")
-    assert coordinator.complete("Dimm das Licht auf dreißig Prozent")
+    assert coordinator.complete("Dimm das Licht im Wohnzimmer auf dreißig Prozent")
+    assert coordinator.complete("Wie spät ist es?")
     assert not coordinator.complete("Mach das Licht im")
+    assert not coordinator.complete("Mach das Licht an"), "may still go on with the room"
+    assert not coordinator.complete("Dimm das Licht auf dreißig Prozent")
     session = AreaSession("a")
     assert not coordinator.complete("Ja", session)
     session.pending = Pending("control", "Tor öffnen?", [])

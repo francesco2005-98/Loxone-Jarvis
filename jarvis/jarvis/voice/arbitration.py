@@ -167,6 +167,18 @@ class AreaSession:
     def followup_expired(self) -> bool:
         return self.phase == Phase.FOLLOWUP and self.clock() > self.followup_until
 
+    def interrupt(self) -> None:
+        """Cut off while speaking: the conversation goes on, the rest of the answer does not."""
+        if self.suggestion is not None and hasattr(self.suggestion, "cancel"):
+            self.suggestion.cancel()
+        self.suggestion = None
+        self.pending = None
+        self.phase = Phase.IDLE
+        self.candidates = {}
+        self.winner = None
+        self.followup_mic = None
+        self.followup_until = 0.0
+
     def reset(self) -> None:
         self.phase = Phase.IDLE
         self.candidates = {}

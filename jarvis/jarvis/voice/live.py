@@ -65,9 +65,9 @@ class Segmenter:
         self.config = VadConfig(
             margin_db=base.margin_db,
             floor_dbfs=base.floor_dbfs,
-            end_silence_ms=400,
+            end_silence_ms=base.end_silence_ms,
             no_speech_timeout_ms=10**9,
-            max_utterance_ms=12000,
+            max_utterance_ms=base.max_utterance_ms,
         )
         self._noise: float | None = None
         self.count = 0

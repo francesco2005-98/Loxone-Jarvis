@@ -391,10 +391,11 @@ def test_old_lead_silence_follows_the_new_default(house):
     assert Settings(house.db).get("announce.silence_ms") == 300
     house.settings.update({"announce.silence_ms": 800})
     assert Settings(house.db).get("announce.silence_ms") == 800
-    house.settings.update({"voice.end_silence_ms": 550})
-    assert Settings(house.db).get("voice.end_silence_ms") == 400
-    house.settings.update({"voice.end_silence_ms": 700})
-    assert Settings(house.db).get("voice.end_silence_ms") == 700
+    for old in (550, 400):
+        house.settings.update({"voice.end_silence_ms": old})
+        assert Settings(house.db).get("voice.end_silence_ms") == 700
+    house.settings.update({"voice.end_silence_ms": 900})
+    assert Settings(house.db).get("voice.end_silence_ms") == 900
 
 
 def test_earlier_recognition_defaults_move_to_kroko_once(house):

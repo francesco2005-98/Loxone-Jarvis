@@ -13,6 +13,8 @@ import numpy as np
 SAMPLE_RATE = 16000
 FRAME_MS = 30
 FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
+# Once someone talks, softer syllables a few dB under the start threshold still count as speech.
+HOLD_DB = 4.0
 
 
 def frame_dbfs(frame: bytes) -> float:
@@ -30,19 +32,19 @@ class VadConfig:
     margin_db: float = 9.0
     floor_dbfs: float = -52.0
     start_frames: int = 3
-    end_silence_ms: int = 400
+    end_silence_ms: int = 700
     no_speech_timeout_ms: int = 5000
-    max_utterance_ms: int = 12000
+    # Counted from the first word, so a late start after the wake word keeps the full time.
+    max_utterance_ms: int = 15000
 
     @classmethod
-    def for_noise_filter(cls, level: int, followup: bool = False, end_silence_ms: int = 400) -> "VadConfig":
+    def for_noise_filter(cls, level: int, followup: bool = False, end_silence_ms: int = 700) -> "VadConfig":
         level = max(0, min(4, level))
         return cls(
             margin_db=7.0 + 1.5 * level,
             floor_dbfs=-55.0 + 1.5 * level,
             end_silence_ms=end_silence_ms,
             no_speech_timeout_ms=8000 if followup else 5000,
-            max_utterance_ms=8000 if followup else 12000,
         )
 
 
@@ -57,6 +59,7 @@ class Endpointer:
         self._loud_run = 0
         self._silence_ms = 0
         self._elapsed_ms = 0
+        self._speech_from = 0
         self.speech_started = False
 
     @property
@@ -86,19 +89,21 @@ class Endpointer:
         cfg = self.config
         self._elapsed_ms += FRAME_MS
         level = frame_dbfs(frame)
-        is_speech = level > self._threshold()
+        threshold = self._threshold()
         if not self.speech_started:
-            if is_speech:
+            if level > threshold:
                 self._speech_run += 1
                 if self._speech_run >= cfg.start_frames:
                     self.speech_started = True
                     self._silence_ms = 0
+                    self._speech_from = self._elapsed_ms - cfg.start_frames * FRAME_MS
             else:
                 self._speech_run = 0
                 self._noise = level if self._noise is None else 0.9 * self._noise + 0.1 * level
             if not self.speech_started and self._elapsed_ms >= cfg.no_speech_timeout_ms:
                 return "timeout"
         else:
+            is_speech = level > threshold - HOLD_DB
             # One loud frame in a pause is room noise. It must not restart the wait,
             # or a crackle keeps the board streaming for the whole utterance limit.
             if is_speech:
@@ -110,8 +115,8 @@ class Endpointer:
                 self._silence_ms += FRAME_MS
                 if self._silence_ms >= cfg.end_silence_ms:
                     return "end"
-        if self._elapsed_ms >= cfg.max_utterance_ms:
-            return "end" if self.speech_started else "timeout"
+            if self._elapsed_ms - self._speech_from >= cfg.max_utterance_ms:
+                return "end"
         return "continue"
 
 

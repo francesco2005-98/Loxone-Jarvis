@@ -22,6 +22,7 @@ from .arbitration import ARBITRATION_WINDOW, AreaSession, Offer, Phase, rms
 from .speaker import identify, profile_from
 from .correct import correct
 from .vad import Endpointer, VadConfig, high_pass
+from .wake import WAKE
 
 if TYPE_CHECKING:
     from ..house import House
@@ -36,6 +37,14 @@ OFFER_YES = {"gerne", "klar", "sicher", "unbedingt", "bitte", "jo", "jep", "sure
 OFFER_FOLLOWUP_MIN = 6.0
 # Recognition starts on a short pause and is kept if the pause turns into the end of the sentence.
 SPECULATE_MS = 250
+_SELF_CONTAINED = {"time", "date", "timer_left", "timer_cancel"}
+# A whole sentence that only asks Jarvis to be quiet, usually right after interrupting him.
+_HUSH = re.compile(
+    r"^(?:(?:ok(?:ay)?|ja|nein|danke|bitte)[ ,]+)*"
+    r"(?:stopp?|halt|ruhe|still|sei (?:still|ruhig)|genug|schon gut|(?:das )?reicht|abbrechen|vergiss es|hör auf|danke|"
+    r"stop|quiet|enough|never ?mind|that'?s (?:enough|fine)|thanks?)"
+    r"(?:[ ,]+(?:danke|bitte|jarvis))*[.!]*$"
+)
 
 
 @dataclass
@@ -96,12 +105,16 @@ class Coordinator:
         mic.level = level
         self.house.events.publish({"type": "level", "mic": mic.id, "area": mic.area_id, "level": round(level, 3)})
 
-    def set_speaking(self, area_id: str, active: bool) -> None:
+    def set_speaking(self, area_id: str, active: bool, text: str = "") -> None:
+        """While Jarvis talks the boards keep listening for "Jarvis", so he can be interrupted.
+
+        Only a reply that itself contains the wake word mutes them, or Jarvis would wake himself.
+        """
         if active:
             self.speaking.add(area_id)
         else:
             self.speaking.discard(area_id)
-        self.house.mics.mute_area(area_id, active)
+        self.house.mics.speaking(area_id, active, mute=active and bool(WAKE.search(text)))
         self._phase(area_id)
 
     @property
@@ -120,9 +133,12 @@ class Coordinator:
         if not mic.area_id or self.house.areas.get(mic.area_id) is None:
             self.house.events.log("mic", f"{mic.label} hat keinen Bereich", "Auf der Mikrofonseite zuordnen")
             return None
-        if mic.area_id in self.speaking:
-            return None
         session = self.session(mic.area_id)
+        if mic.area_id in self.speaking or session.phase == Phase.SPEAKING:
+            if wake_word is None:
+                return None
+            self.interrupt(mic.area_id)
+        self._unstick(session)
         offer = session.offer(mic.id, wake_word is not None)
         if offer == Offer.REJECT:
             return None
@@ -143,6 +159,26 @@ class Coordinator:
                 asyncio.get_running_loop().call_later(ARBITRATION_WINDOW, self._decide, area_id)
         self._phase(mic.area_id)
         return 0
+
+    def interrupt(self, area_id: str) -> None:
+        """ "Jarvis" while he talks: drop the rest of the answer and listen to the new sentence."""
+        self.house.speech.interrupt(area_id)
+        self.session(area_id).interrupt()
+        area = self.house.areas.get(area_id)
+        self.house.events.log("voice", "Jarvis unterbrochen", area.name if area else "")
+
+    def _unstick(self, session: AreaSession) -> None:
+        """A Bereich still collecting or listening without a live run (board gone mid-sentence) starts over."""
+        if session.phase not in (Phase.COLLECTING, Phase.LISTENING):
+            return
+        live = any(run.area_id == session.area_id and run.state != "done" for run in self.runs.values())
+        if not live:
+            session.reset()
+
+    async def drop_mic(self, mic: "Mic") -> None:
+        """The board lost its connection: finish or forget what it was streaming."""
+        if mic.id in self.runs:
+            await self.on_stop(mic, True)
 
     def on_audio(self, mic: "Mic", data: bytes) -> None:
         run = self.runs.get(mic.id)
@@ -187,11 +223,18 @@ class Coordinator:
             self._finish(run, "end")
 
     def complete(self, text: str, session: AreaSession | None = None) -> bool:
-        """True when the words so far already form an instant command or a yes/no answer."""
+        """True when the words so far already form an unambiguous instant command or a yes/no answer.
+
+        "Mach das Licht an" may still go on with "im Wohnzimmer", so a command
+        without a room or device name waits for the normal end of the sentence.
+        """
         text = correct(text, self.house)
         if session is not None and session.pending is not None and confirm.classify(text) != confirm.Answer.UNCLEAR:
             return True
-        return quick.parse(text) is not None
+        command = quick.parse(text)
+        if command is None:
+            return False
+        return command.room is not None or command.device is not None or command.kind in _SELF_CONTAINED
 
     async def _transcribe(self, audio: bytes):
         house = self.house
@@ -244,14 +287,15 @@ class Coordinator:
         if run.state == "done":
             return
         run.state = "done"
-        mics = self.house.mics
-        mics.send(run.mic, "STT_VAD_END")
+        # One RUN_END while the board still streams. After STT_VAD_END the board waits for a
+        # RUN_END, but drops one that arrives while its microphone is still stopping, and then
+        # never listens for "Jarvis" again until it reconnects.
+        self.house.mics.send(run.mic, "RUN_END")
         audio = bytes(run.audio)
         if run.kind == "enroll":
             self.house.background(self._enroll_step(run, audio, result), "enroll")
             return
         if result == "timeout":
-            mics.send(run.mic, "RUN_END")
             self.runs.pop(run.mic.id, None)
             if run.area_id:
                 self.session(run.area_id).reset()
@@ -312,13 +356,16 @@ class Coordinator:
             else:
                 pcm, transcript = await self._transcribe(audio)
             stt_ms = int((time.monotonic() - started) * 1000)
-            mics.send(run.mic, "STT_END", {"text": transcript.text[:200] or " "})
-            mics.send(run.mic, "INTENT_START")
-            mics.send(run.mic, "INTENT_END", {"conversation_id": "", "continue_conversation": "0"})
-            mics.send(run.mic, "RUN_END")
-            self.runs.pop(run.mic.id, None)
+            if self.runs.get(run.mic.id) is run:
+                self.runs.pop(run.mic.id, None)
             if area is None or not transcript.usable:
                 session.reset()
+                self._phase(run.area_id)
+                return
+            if session.pending is None and _hush(transcript.text):
+                house.events.log("voice", f"„{transcript.text}“", "Jarvis schweigt")
+                session.reset()
+                self._phase(area.id)
                 return
             # The reply does not wait for speaker recognition. A name that is already
             # known is used; otherwise the answer stays neutral.
@@ -347,11 +394,17 @@ class Coordinator:
             house.events.log("voice", f"„{transcript.text}“", reply[:200])
             if reply:
                 session.start_speaking()
+                spoke_at = time.monotonic()
                 await house.speech.say(reply, transcript.lang, [area])
                 self.last["timing"]["voice"] = house.speech.last_voice_ms
+                if house.speech.interrupted_since(area.id, spoke_at):
+                    # The new sentence after "Jarvis" owns the Bereich now.
+                    return
                 offer = await self.take_suggestion(session)
                 if offer is not None:
                     await house.speech.say(offer.question, transcript.lang, [area])
+                    if house.speech.interrupted_since(area.id, spoke_at):
+                        return
             if session.phase in (Phase.SPEAKING, Phase.THINKING) and not session.keep_talking(
                 float(house.settings.get("voice.conversation_s"))
             ):
@@ -370,7 +423,6 @@ class Coordinator:
                     await mics.listen(run.mic)
         except Exception:  # noqa: BLE001
             log.exception("voice processing failed")
-            mics.send(run.mic, "RUN_END")
             session.reset()
             self._phase(run.area_id)
         finally:
@@ -681,7 +733,6 @@ class Coordinator:
 
     async def _enroll_step(self, run: Run, audio: bytes, result: str) -> None:
         mics = self.house.mics
-        mics.send(run.mic, "RUN_END")
         self.runs.pop(run.mic.id, None)
         job = self.enroll.get(run.mic.id)
         if job is None:
@@ -731,6 +782,12 @@ def _remember_model(session: AreaSession, text: str) -> None:
     except ImportError:
         return
     session.history = (list(session.history) + [types.Content(role="model", parts=[types.Part.from_text(text=text)])])[-12:]
+
+
+def _hush(text: str) -> bool:
+    """ "Stopp", "Danke, das reicht": the sentence only asks Jarvis to be quiet."""
+    text = WAKE.sub("", text or "").strip(" ,.!?").lower()
+    return bool(text) and _HUSH.match(text) is not None
 
 
 def _fragment(text: str) -> bool:

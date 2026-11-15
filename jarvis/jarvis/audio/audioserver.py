@@ -85,6 +85,7 @@ class AudioserverClient:
         self._waiters: dict[str, deque[asyncio.Future]] = defaultdict(deque)
         self._announcements: dict[str, Announcement] = {}
         self._event_active: dict[int, bool] = {}
+        self._music: dict[int, bool] = {}
         self._listeners: list[Callable[[int, bool], None]] = []
         self._task: asyncio.Task | None = None
         self._kick = asyncio.Event()
@@ -257,6 +258,8 @@ class AudioserverClient:
                 continue
             eventype = item.get("eventype")
             path = str(item.get("audiopath") or "")
+            if not eventype:
+                self._music[player] = item.get("mode") == "play"
             if eventype and item.get("mode") == "play":
                 if not self._event_active.get(player):
                     self._event_active[player] = True
@@ -347,6 +350,14 @@ class AudioserverClient:
 
     def event_active(self, player: int) -> bool:
         return bool(self._event_active.get(player))
+
+    def music_playing(self, player: int) -> bool:
+        """Music was playing before the current announcement. A playing zone reports every few seconds."""
+        return bool(self._music.get(player))
+
+    async def pause(self, player: int) -> None:
+        await self.ensure_ready()
+        await self._command(f"audio/{player}/pause", "pause_result", timeout=3.0)
 
     def public(self) -> dict:
         return {"name": self.name, "host": self.address, "status": self.status, "error": self.error}
@@ -553,6 +564,40 @@ class Audioservers:
         combined = Announcement("", set().union(*(part.players for part in parts)))
         asyncio.create_task(_join(parts, combined))
         return combined
+
+    async def cut(self, announcement: Announcement, wait: float = 1.5) -> bool:
+        """Try to end an announcement early. True when every zone stopped speaking.
+
+        The Audioserver has no documented stop for an uploaded announcement. A pause
+        is sent only to zones without music: there it can at most end the announcement,
+        while in a zone with music it might leave the music paused afterwards.
+        """
+        quiet: list[int] = []
+        busy: list[int] = []
+        for player in sorted(announcement.players):
+            client = self.client_for(player)
+            if client is None:
+                continue
+            if client.music_playing(player):
+                busy.append(player)
+                continue
+            try:
+                await client.pause(player)
+                quiet.append(player)
+            except Exception as exc:  # noqa: BLE001
+                log.info("pause on player %s failed: %s", player, exc)
+        try:
+            await asyncio.wait_for(announcement.finished.wait(), timeout=wait)
+            stopped = True
+        except asyncio.TimeoutError:
+            stopped = False
+        if stopped:
+            self.events.log("audio", "Durchsage abgebrochen", ", ".join(f"Player {p}" for p in quiet))
+        elif busy and not quiet:
+            self.events.log("audio", "Durchsage läuft zu Ende", "In der Zone läuft Musik, Jarvis bricht dort nicht ab")
+        else:
+            self.events.log("audio", "Durchsage läuft zu Ende", "Der Audioserver hat die Pause während der Durchsage ignoriert")
+        return stopped
 
     async def favorites(self, player: int) -> list[dict]:
         return await self._require(player).favorites(player)

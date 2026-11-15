@@ -110,8 +110,8 @@ export default function ai(view, ctx) {
     h(
       "div",
       { class: "kv" },
-      ...row("Satzende nach", endSilence.row, "So lange Stille gilt als Satzende. Kürzer antwortet schneller, länger lässt Zeit für kurze Denkpausen im Satz."),
-      ...row("Vorab-Erkennung", speculative, "Startet die Spracherkennung schon in der ersten kurzen Pause. Ist der Satz bis dahin ein vollständiger Sofortbefehl, antwortet Jarvis sofort, ohne das Satzende abzuwarten. Spart rund 0,3 s."),
+      ...row("Satzende nach", endSilence.row, "So lange Stille gilt als Satzende, Vorgabe 700 ms. Kürzer antwortet schneller, schneidet aber Sätze mit kurzen Denkpausen ab."),
+      ...row("Vorab-Erkennung", speculative, "Startet die Spracherkennung schon in der ersten kurzen Pause. Ist der Satz bis dahin ein vollständiger Sofortbefehl mit Raum oder Gerät, antwortet Jarvis sofort, ohne das Satzende abzuwarten. Spart rund 0,3 s."),
       ...row("Nachfrage-Fenster", followup.row, "So lange hört Jarvis nach einer Antwort ohne erneutes „Jarvis“ zu."),
       ...row("Gespräch endet nach", conversation.row, "So lange nach dem letzten „Jarvis“ gehen Rückfragen ohne Aktivierungswort. Danach, und sobald ein Satz nicht an Jarvis gerichtet ist (Gespräch im Raum, Fernseher), muss er wieder mit „Jarvis“ geweckt werden. Der Gesprächsverlauf wird dann geleert."),
       ...row("Sofortantworten", quickToggle, "Licht, Lichtkreise, Stimmungen, Dimmen, Rollos, Uhrzeit und Datum ohne Gemini, in Jarvis' Persönlichkeit."),

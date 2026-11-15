@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 
 API_PORT = 6053
 KEY_PREFIX = "mic.key."
+# Wake word sensitivity points taken off while Jarvis speaks in the Bereich.
+SPEAKING_STRICTNESS = 25
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,62}$")
 
 
@@ -143,6 +145,7 @@ class MicManager:
         async def on_disconnect(expected: bool) -> None:
             mic.connected = False
             mic.unsubscribe = None
+            await self.house.coordinator.drop_mic(mic)
             self.house.events.publish({"type": "mic", "mic": mic.public()})
             if not expected:
                 self.house.events.log("mic", f"{mic.label} getrennt")
@@ -199,6 +202,9 @@ class MicManager:
         )
         mic.connected = True
         self._save(mic)
+        # The board keeps the wake word switch across reboots. A mute sent while it was
+        # offline never arrived, so it is set again on every connect.
+        self.mute(mic, False)
         self.apply_sensitivity(mic)
         address = self.house.device_url()
         if address and "set_server_url" in mic.services:
@@ -317,9 +323,16 @@ class MicManager:
             except Exception:  # noqa: BLE001
                 log.debug("mute failed", exc_info=True)
 
-    def mute_area(self, area_id: str, muted: bool) -> None:
+    def speaking(self, area_id: str, active: bool, mute: bool = False) -> None:
+        """While Jarvis talks the boards only wake on a clear "Jarvis", so his own voice does not trigger them."""
+        value = float(self.house.settings.get("mic.sensitivity"))
         for mic in self.in_area(area_id):
-            self.mute(mic, muted)
+            self.mute(mic, mute)
+            if mic.connected and mic.number_key is not None:
+                try:
+                    mic.client.number_command(mic.number_key, max(0.0, value - SPEAKING_STRICTNESS) if active else value)
+                except Exception:  # noqa: BLE001
+                    log.debug("sensitivity failed", exc_info=True)
 
     async def listen(self, mic: Mic) -> bool:
         service = mic.services.get("listen")
