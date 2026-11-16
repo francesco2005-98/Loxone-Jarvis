@@ -71,6 +71,13 @@ class Endpointer:
         """Stream position of the last speech frame; unchanged while the speaker stays quiet."""
         return self._elapsed_ms - self._silence_ms
 
+    @property
+    def speech_ms(self) -> int:
+        """How long the voice itself lasted, without the silence after it."""
+        if not self.speech_started:
+            return 0
+        return max(0, self.last_speech_ms - self._speech_from)
+
     def _threshold(self) -> float:
         noise = self._noise if self._noise is not None else -60.0
         return max(noise + self.config.margin_db, self.config.floor_dbfs)

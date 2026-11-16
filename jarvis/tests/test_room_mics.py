@@ -155,6 +155,92 @@ def _done():
     return fut
 
 
+def test_the_tail_of_his_own_sentence_is_not_a_new_command(house):
+    area = house.areas.create("Wohnen")
+    mic = board(house, area.id)
+    coordinator = house.coordinator
+    seen = []
+
+    async def handle_text(*args, **kwargs):
+        seen.append("handled")
+        return "Noch einmal.", []
+
+    async def say(*args, **kwargs):
+        seen.append("said")
+        return True
+
+    async def transcribe(audio):
+        return audio, Transcript("Licht im Wohnzimmer ist an", "de", 0.0, 0.0)
+
+    coordinator.handle_text = handle_text
+    coordinator._transcribe = transcribe
+    house.speech.say = say
+    house.mics.listen = lambda mic_: _done()
+    session = coordinator.session(area.id)
+    session.open_followup(mic.id, 8)
+    coordinator._note_said(area.id, "Sehr wohl, Sir. Das Licht im Wohnzimmer ist an.")
+
+    async def go():
+        from jarvis.voice.coordinator import Run
+
+        run = Run(mic, area.id, "followup", Endpointer(), gen=0)
+        await coordinator._process(run, b"\0" * 4000)
+
+    asyncio.run(go())
+    assert seen == []
+    assert session.phase == Phase.FOLLOWUP
+
+
+def test_a_short_blip_does_not_make_him_answer(house):
+    area = house.areas.create("Wohnen")
+    mic = board(house, area.id)
+    coordinator = house.coordinator
+    said = []
+
+    async def say(text, lang, areas):
+        said.append(text)
+        return True
+
+    async def transcribe(audio):
+        return audio, Transcript("hm na", "de", 0.0, 0.0)
+
+    coordinator._transcribe = transcribe
+    house.speech.say = say
+    ep = Endpointer()
+    ep.speech_started = True
+    ep._speech_from = 0
+    ep._elapsed_ms = 180
+    ep._silence_ms = 0
+
+    async def go():
+        from jarvis.voice.coordinator import Run
+
+        run = Run(mic, area.id, "command", ep, gen=0)
+        await coordinator._process(run, b"\0" * 4000)
+
+    asyncio.run(go())
+    assert said == []
+    assert coordinator.session(area.id).phase == Phase.IDLE
+
+
+def test_a_wake_in_the_tail_of_the_announcement_is_ignored(house):
+    area = house.areas.create("Wohnen")
+    mic = board(house, area.id)
+    coordinator = house.coordinator
+    coordinator.set_speaking(area.id, True, "Das Licht ist an.")
+    coordinator.set_speaking(area.id, False)
+
+    async def go():
+        ignored = await coordinator.on_start(mic, "conv", "jarvis")
+        coordinator._quiet_until[area.id] = 0
+        accepted = await coordinator.on_start(mic, "conv", "jarvis")
+        return ignored, accepted
+
+    ignored, accepted = asyncio.run(go())
+    assert ignored is None
+    assert accepted == 0
+
+
 def test_saying_jarvis_while_he_speaks_interrupts_him(house):
     area = house.areas.create("Wohnen")
     mic = board(house, area.id)
@@ -219,7 +305,7 @@ def test_boards_keep_listening_while_jarvis_talks_unless_he_says_jarvis(house):
     coordinator = house.coordinator
     coordinator.set_speaking(area.id, True, "Das Licht ist an, Sir.")
     assert mic.client.switch == [True], "wake word stays on"
-    assert mic.client.number[-1] == 65, "Jarvis stays easy to interrupt over the announcement"
+    assert mic.client.number[-1] == 50, "his own voice does not make the wake word easier"
     coordinator.set_speaking(area.id, False)
     assert mic.client.number[-1] == 50
     coordinator.set_speaking(area.id, True, "Ich bin Jarvis, Ihr Butler.")

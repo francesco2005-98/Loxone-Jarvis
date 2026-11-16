@@ -24,8 +24,6 @@ log = logging.getLogger(__name__)
 
 API_PORT = 6053
 KEY_PREFIX = "mic.key."
-# Wake word sensitivity points added while Jarvis speaks, so "Jarvis" still cuts through the announcement.
-SPEAKING_BOOST = 15
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,62}$")
 
 
@@ -324,14 +322,17 @@ class MicManager:
                 log.debug("mute failed", exc_info=True)
 
     def speaking(self, area_id: str, active: bool, mute: bool = False) -> None:
-        """While Jarvis talks, "Jarvis" stays easy to hit, so he can be interrupted over his own voice."""
+        """Keep the chosen wake sensitivity while Jarvis talks.
+
+        Raising it made the announcement and the room trip the model. A reply
+        that itself says "Jarvis" still mutes the boards, or he would wake himself.
+        """
         value = float(self.house.settings.get("mic.sensitivity"))
         for mic in self.in_area(area_id):
             self.mute(mic, mute)
             if mic.connected and mic.number_key is not None:
                 try:
-                    heard = min(100.0, value + SPEAKING_BOOST) if active else value
-                    mic.client.number_command(mic.number_key, heard)
+                    mic.client.number_command(mic.number_key, value)
                 except Exception:  # noqa: BLE001
                     log.debug("sensitivity failed", exc_info=True)
 

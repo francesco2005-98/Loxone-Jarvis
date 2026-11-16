@@ -37,6 +37,11 @@ OFFER_YES = {"gerne", "klar", "sicher", "unbedingt", "bitte", "jo", "jep", "sure
 OFFER_FOLLOWUP_MIN = 6.0
 # Recognition starts on a short pause and is kept if the pause turns into the end of the sentence.
 SPECULATE_MS = 250
+# After the announcement the room still rings. A wake in that window is his own voice.
+QUIET_AFTER_SPEECH = 0.7
+# Shorter than a real command. A false wake leaves only a blip.
+MIN_COMMAND_MS = 380
+SAID_MEMORY_S = 20.0
 _SELF_CONTAINED = {"time", "date", "timer_left", "timer_cancel"}
 # A whole sentence that only asks Jarvis to be quiet, usually right after interrupting him.
 _HUSH = re.compile(
@@ -83,6 +88,8 @@ class Coordinator:
         self._suggested_at: dict[str, float] = {}
         self._level_at: dict[str, float] = {}
         self._gen: dict[str, int] = {}
+        self._quiet_until: dict[str, float] = {}
+        self._said: dict[str, tuple[float, str]] = {}
 
     # ------------------------------------------------------------ helpers
     def session(self, area_id: str) -> AreaSession:
@@ -114,8 +121,11 @@ class Coordinator:
         """
         if active:
             self.speaking.add(area_id)
+            self._quiet_until.pop(area_id, None)
         else:
             self.speaking.discard(area_id)
+            # The tail of the announcement still reaches the microphone.
+            self._quiet_until[area_id] = time.monotonic() + QUIET_AFTER_SPEECH
         self.house.mics.speaking(area_id, active, mute=active and bool(WAKE.search(text)))
         self._phase(area_id)
 
@@ -134,6 +144,9 @@ class Coordinator:
             return 0
         if not mic.area_id or self.house.areas.get(mic.area_id) is None:
             self.house.events.log("mic", f"{mic.label} hat keinen Bereich", "Auf der Mikrofonseite zuordnen")
+            return None
+        if wake_word and mic.area_id not in self.speaking and time.monotonic() < self._quiet_until.get(mic.area_id, 0.0):
+            self.house.events.log("mic", f"{mic.label} hat den Nachhall gehört", "kein neuer Befehl")
             return None
         session = self.session(mic.area_id)
         busy = mic.area_id in self.speaking or session.phase in (Phase.THINKING, Phase.SPEAKING)
@@ -421,21 +434,25 @@ class Coordinator:
                 session.reset()
                 self._phase(run.area_id)
                 return
+            said = self._recent_said(area.id)
             if not transcript.usable:
-                if run.kind == "followup":
-                    # Noise after an answer. Stay quiet and keep listening for a real sentence.
+                if run.kind == "followup" or self._blip(run, session):
+                    # Room noise, or a wake the model invented. Stay quiet.
+                    await self._drop(area, run, "Kein Satz")
                     return
                 await self._say_line(area, run, _missed(transcript.lang or "de"), transcript.lang or "de", "", stt_ms, started)
                 return
             woke, rest = split_wake(transcript.text)
             spoken = rest if woke else transcript.text
             if woke and not has_words(rest):
-                # Just "Jarvis" again: keep the conversation and listen for the command.
-                session.woke()
-                seconds = float(house.settings.get("voice.followup_s")) or 8
-                session.open_followup(run.mic.id, seconds)
-                self._phase(area.id)
-                await mics.listen(run.mic)
+                # Just "Jarvis": keep the conversation and listen for the command.
+                await self._listen_for_command(area, run)
+                return
+            if _echo(spoken or transcript.text, said):
+                await self._drop(area, run, "Nachhall der letzten Ansage")
+                return
+            if self._blip(run, session) and session.pending is None and quick.parse(spoken) is None:
+                await self._drop(area, run, "Zu kurz für einen Befehl")
                 return
             if session.pending is None and _hush(spoken):
                 house.events.log("voice", f"„{transcript.text}“", "Jarvis schweigt")
@@ -488,6 +505,7 @@ class Coordinator:
                 session.start_speaking()
                 spoke_at = time.monotonic()
                 house.speech.last_timing = {}
+                self._note_said(area.id, reply)
                 await house.speech.say(reply, transcript.lang, [area])
                 self.last["timing"]["voice"] = house.speech.last_voice_ms
                 self.last["timing"].update(house.speech.last_timing)
@@ -552,6 +570,7 @@ class Coordinator:
         house.events.publish({"type": "utterance", "utterance": self.last})
         house.events.log("voice", f"„{spoken or '—'}“", reply)
         session.start_speaking()
+        self._note_said(area.id, reply)
         await house.speech.say(reply, lang, [area])
         if not self._fresh(run.area_id, run.gen):
             return
@@ -559,6 +578,44 @@ class Coordinator:
         session.open_followup(run.mic.id, seconds)
         self._phase(area.id)
         await house.mics.listen(run.mic)
+
+    def _note_said(self, area_id: str, text: str) -> None:
+        if text:
+            self._said[area_id] = (time.monotonic(), text)
+
+    def _recent_said(self, area_id: str) -> str:
+        noted = self._said.get(area_id)
+        if noted is None or time.monotonic() - noted[0] > SAID_MEMORY_S:
+            return ""
+        return noted[1]
+
+    def _blip(self, run: Run, session: AreaSession) -> bool:
+        """A wake with almost no voice behind it. A yes to an open question is still a sentence."""
+        if session.pending is not None or not run.endpointer.speech_started:
+            return False
+        return run.endpointer.speech_ms < MIN_COMMAND_MS
+
+    async def _listen_for_command(self, area: Area, run: Run) -> None:
+        """The wake word arrived without a sentence yet. Keep the microphone open for it."""
+        session = self.session(area.id)
+        session.woke()
+        seconds = float(self.house.settings.get("voice.followup_s")) or 8
+        session.open_followup(run.mic.id, seconds)
+        self._phase(area.id)
+        await self.house.mics.listen(run.mic)
+
+    async def _drop(self, area: Area, run: Run, reason: str) -> None:
+        """The microphone reacted, but nobody asked for anything. Stay quiet."""
+        session = self.session(area.id)
+        self.house.events.log("voice", reason, "")
+        remaining = session.followup_until - time.monotonic()
+        if run.kind == "followup" and session.followup_mic and remaining > 0.4:
+            session.phase = Phase.FOLLOWUP
+            self._phase(area.id)
+            await self.house.mics.listen(run.mic)
+            return
+        session.reset()
+        self._phase(area.id)
 
     def _expire(self, area_id: str, until: float) -> None:
         session = self.sessions.get(area_id)
@@ -932,6 +989,15 @@ def hold_line(lang: str, anrede: str | None) -> str:
     if lang == "en":
         return f"One moment{', ' + anrede if anrede else ''}. I'll look that up."
     return f"Einen Moment{', ' + anrede if anrede else ''}. Ich schaue das nach."
+
+
+def _echo(heard: str, spoken: str) -> bool:
+    """True when the microphone picked up a stretch of the sentence Jarvis just said."""
+    heard_words = " ".join(re.findall(r"[a-zäöüß0-9]+", WAKE.sub(" ", heard or "").lower()))
+    spoken_words = " ".join(re.findall(r"[a-zäöüß0-9]+", (spoken or "").lower()))
+    if len(heard_words) < 8 or len(spoken_words) < 8:
+        return False
+    return heard_words in spoken_words
 
 
 def _hush(text: str) -> bool:
