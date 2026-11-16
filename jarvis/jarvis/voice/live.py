@@ -21,6 +21,8 @@ from ..audio import wav
 from .arbitration import AreaSession
 from .stt import KROKO
 from .vad import FRAME_BYTES, Endpointer, VadConfig, high_pass
+from ..brain.tools import Turn
+from .coordinator import _missed, hold_line
 from .wake import has_words, split_wake
 
 if TYPE_CHECKING:
@@ -361,6 +363,10 @@ class LiveSession:
             transcript = await self._transcribe(pcm)
         self._stt_ms = int((time.monotonic() - started) * 1000)
         if not transcript.usable:
+            if self.phase == "listening":
+                await self._play_line(_missed("de"), "de", gen)
+                if self._current(gen):
+                    await self._state("listening", time.monotonic() + LISTEN_SECONDS)
             return
         woke, rest = split_wake(transcript.text)
         followup = self.phase == "followup" and not woke
@@ -394,14 +400,24 @@ class LiveSession:
         person_id = await asyncio.to_thread(coordinator._identify, pcm)
         if not self._current(gen):
             return
+        anrede = coordinator._anrede(Turn(area=self.area, lang=lang, text=text, person_id=person_id))
+
+        async def hold() -> None:
+            await self._play_line(hold_line(lang, anrede), lang, gen)
+
         reply, done = await coordinator.handle_text(
-            self.session, self.area, text, lang, person_id, origin="live", followup=followup
+            self.session, self.area, text, lang, person_id, origin="live", followup=followup, hold=hold
         )
         if not self._current(gen):
             return
         if not reply:
-            house.events.log("voice", f"Live, nicht an Jarvis: „{text}“", "Gespräch beendet")
-            await self._end()
+            if followup:
+                house.events.log("voice", f"Live, nicht an Jarvis: „{text}“", "Gespräch beendet")
+                await self._end()
+                return
+            await self._play_line(_missed(lang), lang, gen)
+            if self._current(gen):
+                await self._state("listening", time.monotonic() + LISTEN_SECONDS)
             return
         await self.send({"type": "heard", "text": text})
         brain_ms = int((time.monotonic() - started) * 1000)
@@ -448,6 +464,18 @@ class LiveSession:
             await self._state("followup", time.monotonic() + seconds)
         else:
             await self._end()
+
+    async def _play_line(self, text: str, lang: str, gen: int | None) -> None:
+        """One short line on this device. Used when a search runs long, or nothing was understood."""
+        if not self._current(gen):
+            return
+        audio, duration = await self._render(text, lang)
+        if not self._current(gen):
+            return
+        self._played.clear()
+        await self._state("speaking")
+        await self.send({"type": "reply", "text": text, "actions": [], "audio": audio})
+        await self._wait_played(audio, duration)
 
     async def _end(self) -> None:
         """Back to waiting for "Jarvis", with a fresh conversation next time."""

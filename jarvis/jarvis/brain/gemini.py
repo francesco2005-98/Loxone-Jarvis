@@ -22,6 +22,8 @@ log = logging.getLogger(__name__)
 
 MAX_STEPS = 6
 HISTORY_ITEMS = 12
+# A web search that is still running after this long gets one short spoken line first.
+HOLD_AFTER = 1.0
 # See the [Nachfrage] and [Ausführlich] rules in prompt.RULES.
 FOLLOWUP_TAG = "[Nachfrage]"
 DETAIL_TAG = "[Ausführlich]"
@@ -399,6 +401,18 @@ class Brain:
         return self.runner.offer(data.get("offer") if isinstance(data, dict) else None, turn)
 
     async def search(self, query: str, turn: Turn) -> str:
+        task = asyncio.create_task(self._search(query, turn))
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), HOLD_AFTER)
+        except asyncio.TimeoutError:
+            if turn.hold is not None:
+                try:
+                    await turn.hold()
+                except Exception:  # noqa: BLE001
+                    log.debug("hold line failed", exc_info=True)
+            return await task
+
+    async def _search(self, query: str, turn: Turn) -> str:
         from google.genai import types
 
         lang = "Deutsch" if turn.lang == "de" else "English"

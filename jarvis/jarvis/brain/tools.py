@@ -45,6 +45,8 @@ class Turn:
     offer: Pending | None = None
     final_text: str | None = None
     done: list[str] = field(default_factory=list)
+    # Spoken once when a web search is still running after a second, so the silence is not a failure.
+    hold: Callable[[], Awaitable[None]] | None = None
     started: float = field(default_factory=time.monotonic)
 
 

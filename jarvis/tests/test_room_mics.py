@@ -81,7 +81,7 @@ def test_a_new_command_while_thinking_discards_the_old_answer(house):
     started = asyncio.Event()
     handled = []
 
-    async def handle_text(session, area_, text, lang, person_id, origin="", followup=False):
+    async def handle_text(session, area_, text, lang, person_id, origin="", followup=False, hold=None):
         handled.append((text, followup))
         if text == "alt":
             started.set()
@@ -122,7 +122,7 @@ def test_a_followup_that_starts_with_jarvis_is_a_new_command(house):
     coordinator = house.coordinator
     seen = {}
 
-    async def handle_text(session, area_, text, lang, person_id, origin="", followup=False):
+    async def handle_text(session, area_, text, lang, person_id, origin="", followup=False, hold=None):
         seen["text"] = text
         seen["followup"] = followup
         return "Erledigt.", []

@@ -51,7 +51,7 @@ class _Fake:
         self.handled = []
         house.stt.transcribe = lambda pcm, **kw: Transcript(self.texts.pop(0), "de", -0.2, 0.01)
 
-        async def handle_text(session, area, text, lang, person_id, origin="", followup=False):
+        async def handle_text(session, area, text, lang, person_id, origin="", followup=False, hold=None):
             self.handled.append((text, origin))
             self.followups.append(followup)
             return self.replies.pop(0) if self.replies else "Erledigt.", ["Licht an"]

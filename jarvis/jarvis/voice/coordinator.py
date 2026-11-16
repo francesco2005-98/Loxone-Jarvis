@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..areas import Area
 from ..brain import confirm, fallback, quick, when
@@ -404,9 +404,15 @@ class Coordinator:
                 self.runs.pop(run.mic.id, None)
             if not self._fresh(run.area_id, run.gen):
                 return
-            if area is None or not transcript.usable:
+            if area is None:
                 session.reset()
                 self._phase(run.area_id)
+                return
+            if not transcript.usable:
+                if run.kind == "followup":
+                    # Noise after an answer. Stay quiet and keep listening for a real sentence.
+                    return
+                await self._say_line(area, run, _missed(transcript.lang or "de"), transcript.lang or "de", "", stt_ms, started)
                 return
             woke, rest = split_wake(transcript.text)
             spoken = rest if woke else transcript.text
@@ -431,14 +437,24 @@ class Coordinator:
             followup = run.kind == "followup" and not woke
             if not self._fresh(run.area_id, run.gen):
                 return
-            reply, done = await self.handle_text(session, area, spoken, transcript.lang, person_id, followup=followup)
+            anrede = self._anrede(Turn(area=area, lang=transcript.lang, text=spoken, person_id=person_id))
+
+            async def hold() -> None:
+                if self._fresh(run.area_id, run.gen):
+                    await house.speech.say(hold_line(transcript.lang, anrede), transcript.lang, [area])
+
+            reply, done = await self.handle_text(
+                session, area, spoken, transcript.lang, person_id, followup=followup, hold=hold
+            )
             if not self._fresh(run.area_id, run.gen):
                 return
             if not reply:
-                house.events.log("voice", f"Nicht an Jarvis: „{transcript.text}“", "Gespräch beendet")
-                session.reset()
-                self._phase(area.id)
-                return
+                if followup:
+                    house.events.log("voice", f"Nicht an Jarvis: „{transcript.text}“", "Gespräch beendet")
+                    session.reset()
+                    self._phase(area.id)
+                    return
+                reply, done = _missed(transcript.lang), []
             brain_ms = int((time.monotonic() - brain_started) * 1000)
             latency = int((time.monotonic() - started) * 1000)
             self.latencies.append(latency)
@@ -493,11 +509,43 @@ class Coordinator:
                     await mics.listen(run.mic)
         except Exception:  # noqa: BLE001
             log.exception("voice processing failed")
-            session.reset()
-            self._phase(run.area_id)
+            if self._fresh(run.area_id, run.gen) and area is not None:
+                try:
+                    await house.speech.say(_failed("de"), "de", [area])
+                except Exception:  # noqa: BLE001
+                    log.debug("failure line was not spoken", exc_info=True)
+            if self._fresh(run.area_id, run.gen):
+                session.reset()
+                self._phase(run.area_id)
         finally:
             if self.runs.get(run.mic.id) is run:
                 self.runs.pop(run.mic.id, None)
+
+    async def _say_line(self, area: Area, run: Run, reply: str, lang: str, spoken: str, stt_ms: int, started: float) -> None:
+        """A line we owe the speaker even though there is no real answer: not understood, or a failure."""
+        if not self._fresh(run.area_id, run.gen):
+            return
+        house = self.house
+        session = self.session(run.area_id)
+        self.last = {
+            "ts": time.time(),
+            "area": area.name,
+            "text": spoken,
+            "reply": reply,
+            "actions": [],
+            "ms": int((time.monotonic() - started) * 1000),
+            "timing": {"stt": stt_ms, "brain": 0},
+        }
+        house.events.publish({"type": "utterance", "utterance": self.last})
+        house.events.log("voice", f"„{spoken or '—'}“", reply)
+        session.start_speaking()
+        await house.speech.say(reply, lang, [area])
+        if not self._fresh(run.area_id, run.gen):
+            return
+        seconds = float(house.settings.get("voice.followup_s")) or 8
+        session.open_followup(run.mic.id, seconds)
+        self._phase(area.id)
+        await house.mics.listen(run.mic)
 
     def _expire(self, area_id: str, until: float) -> None:
         session = self.sessions.get(area_id)
@@ -514,6 +562,7 @@ class Coordinator:
         person_id: str | None,
         origin: str = "",
         followup: bool = False,
+        hold: Any = None,
     ) -> tuple[str, list[str]]:
         """The spoken reply and the actions taken. An empty reply means: not meant for Jarvis, stay quiet."""
         text = correct(text, self.house)
@@ -538,7 +587,7 @@ class Coordinator:
                 session.pending = pending
         session.suggestion = None
         turn = Turn(
-            area=area, lang=lang, text=text, person_id=person_id, origin=origin, followup=followup, detailed=wants_detail(text)
+            area=area, lang=lang, text=text, person_id=person_id, origin=origin, followup=followup, detailed=wants_detail(text), hold=hold
         )
         instant = await self._quick(turn)
         if instant is not None:
@@ -855,6 +904,21 @@ def _remember_model(session: AreaSession, text: str) -> None:
     except ImportError:
         return
     session.history = (list(session.history) + [types.Content(role="model", parts=[types.Part.from_text(text=text)])])[-12:]
+
+
+def _missed(lang: str) -> str:
+    return "I didn't catch that." if lang == "en" else "Das habe ich nicht verstanden."
+
+
+def _failed(lang: str) -> str:
+    return "That didn't work." if lang == "en" else "Das hat nicht geklappt."
+
+
+def hold_line(lang: str, anrede: str | None) -> str:
+    """One short sentence, always the same words, so the voice is already on disk."""
+    if lang == "en":
+        return f"One moment{', ' + anrede if anrede else ''}. I'll look that up."
+    return f"Einen Moment{', ' + anrede if anrede else ''}. Ich schaue das nach."
 
 
 def _hush(text: str) -> bool:

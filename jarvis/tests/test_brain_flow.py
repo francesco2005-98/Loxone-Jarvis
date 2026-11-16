@@ -384,6 +384,42 @@ def test_blinds_dimming_and_time_without_gemini(setup):
     assert "Uhr" in reply
 
 
+def test_a_slow_search_says_that_it_is_looking(house):
+    from jarvis.areas import Area
+    from jarvis.brain.tools import Turn
+
+    held = []
+
+    async def hold():
+        held.append("hold")
+
+    async def generate(contents, config):
+        await asyncio.sleep(1.05)
+        return text("Morgen wird es sonnig.")
+
+    house.brain.generate = generate
+    turn = Turn(area=Area("a", "Wohnen", None, None, []), lang="de", text="Wetter morgen", hold=hold)
+    answer = run(house.brain.search("Wetter morgen", turn))
+    assert held == ["hold"]
+    assert "sonnig" in answer
+
+
+def test_a_fast_search_stays_quiet(house):
+    from jarvis.areas import Area
+    from jarvis.brain.tools import Turn
+
+    held = []
+
+    async def generate(contents, config):
+        return text("Es ist zwölf Grad.")
+
+    house.brain.generate = generate
+    turn = Turn(area=Area("a", "Wohnen", None, None, []), lang="de", text="Temperatur", hold=lambda: held.append("hold"))
+    answer = run(house.brain.search("Temperatur", turn))
+    assert held == []
+    assert "zwölf" in answer
+
+
 def test_old_lead_silence_follows_the_new_default(house):
     from jarvis.settings import Settings
 
