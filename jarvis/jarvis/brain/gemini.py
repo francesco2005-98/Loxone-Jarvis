@@ -331,6 +331,11 @@ class Brain:
                 parts.append(types.Part.from_function_response(name=call.name, response=result))
             contents.append(types.Content(role="user", parts=parts))
             spoken = _spoken(calls, candidate)
+            if done_already and turn.pending is None and any(c.name == "announce" for c in calls) and turn.final_text:
+                # "Sag Hallo zu Jakob" is the sentence itself, not a switch to confirm with "Sehr wohl".
+                text = turn.final_text
+                contents.append(types.Content(role="model", parts=[types.Part.from_text(text=text)]))
+                break
             if done_already and spoken and turn.pending is None:
                 text = spoken
                 contents.append(types.Content(role="model", parts=[types.Part.from_text(text=text)]))

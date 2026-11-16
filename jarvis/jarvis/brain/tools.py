@@ -102,7 +102,10 @@ DECLARATIONS: list[dict] = [
     },
     {
         "name": "announce",
-        "description": "Durchsage in einem, mehreren oder allen Bereichen oder Audio-Zonen (areas: [\"alle\"]).",
+        "description": (
+            "Durchsage in einem anderen Raum oder in allen Bereichen (areas: [\"alle\"]). "
+            "Nicht für den Raum, in dem gerade gesprochen wird: das sagt Jarvis selbst als Antwort."
+        ),
         "parameters_json_schema": _schema(
             {
                 "text": {"type": "string", "description": "Was gesagt werden soll, fertig formuliert"},
@@ -396,7 +399,13 @@ class ToolRunner:
         areas = [a for a in self._target_areas(args.get("areas"), turn) if a.zone_uuid]
         if not areas:
             raise ActionError("Kein Bereich mit Audio-Zone gefunden")
-        self.house.background(self.house.speech.say(text, turn.lang, areas), "announce")
+        here = turn.area.zone_uuid
+        elsewhere = [a for a in areas if a.zone_uuid != here]
+        if elsewhere:
+            self.house.background(self.house.speech.say(text, turn.lang, elsewhere), "announce")
+        # The room that is already listening hears this as the normal answer, not as "Sehr wohl".
+        if any(a.zone_uuid == here for a in areas) or not elsewhere:
+            turn.final_text = text
         turn.done.append("Durchsage: " + ", ".join(a.name for a in areas))
         return {"ok": True, "areas": [a.name for a in areas]}
 

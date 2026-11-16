@@ -117,6 +117,28 @@ def test_explanations_get_more_sentences_quick_questions_stay_short(setup):
     assert "höchstens zwei" in search["config"].system_instruction
 
 
+def test_saying_hello_is_the_answer_itself(setup):
+    from jarvis.brain.quick import parse
+
+    assert parse("Sag Hallo zu Jakob") is None
+    assert parse("Jarvis, sag Hallo zu Jakob") is None
+    house, area, dimmer, gate, sent = setup
+    area = house.areas.update(area.id, zone_uuid="z-wohn")
+    spoken = []
+
+    async def say(text, lang, areas):
+        spoken.append(text)
+        return True
+
+    house.speech.say = say
+    client = FakeClient([call("announce", text="Hallo Jakob.", areas=["Wohnbereich"], reply="Sehr wohl.")])
+    house.brain._genai = lambda: client
+    reply, done = run(house.coordinator.handle_text(AreaSession(area.id), area, "Sag Hallo zu Jakob", "de", None))
+    assert reply == "Hallo Jakob."
+    assert spoken == [], "the room already hears the answer, no second announcement"
+    assert any(item.startswith("Durchsage") for item in done)
+
+
 def test_free_sentence_switches_and_critical_waits_for_yes(setup):
     house, area, dimmer, gate, sent = setup
     client = FakeClient(

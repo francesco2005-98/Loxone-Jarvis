@@ -24,8 +24,8 @@ log = logging.getLogger(__name__)
 
 API_PORT = 6053
 KEY_PREFIX = "mic.key."
-# Wake word sensitivity points taken off while Jarvis speaks in the Bereich.
-SPEAKING_STRICTNESS = 25
+# Wake word sensitivity points added while Jarvis speaks, so "Jarvis" still cuts through the announcement.
+SPEAKING_BOOST = 15
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,62}$")
 
 
@@ -324,13 +324,14 @@ class MicManager:
                 log.debug("mute failed", exc_info=True)
 
     def speaking(self, area_id: str, active: bool, mute: bool = False) -> None:
-        """While Jarvis talks the boards only wake on a clear "Jarvis", so his own voice does not trigger them."""
+        """While Jarvis talks, "Jarvis" stays easy to hit, so he can be interrupted over his own voice."""
         value = float(self.house.settings.get("mic.sensitivity"))
         for mic in self.in_area(area_id):
             self.mute(mic, mute)
             if mic.connected and mic.number_key is not None:
                 try:
-                    mic.client.number_command(mic.number_key, max(0.0, value - SPEAKING_STRICTNESS) if active else value)
+                    heard = min(100.0, value + SPEAKING_BOOST) if active else value
+                    mic.client.number_command(mic.number_key, heard)
                 except Exception:  # noqa: BLE001
                     log.debug("sensitivity failed", exc_info=True)
 

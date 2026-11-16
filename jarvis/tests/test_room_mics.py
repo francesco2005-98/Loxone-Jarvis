@@ -219,7 +219,7 @@ def test_boards_keep_listening_while_jarvis_talks_unless_he_says_jarvis(house):
     coordinator = house.coordinator
     coordinator.set_speaking(area.id, True, "Das Licht ist an, Sir.")
     assert mic.client.switch == [True], "wake word stays on"
-    assert mic.client.number[-1] == 25, "but a clear Jarvis is needed"
+    assert mic.client.number[-1] == 65, "Jarvis stays easy to interrupt over the announcement"
     coordinator.set_speaking(area.id, False)
     assert mic.client.number[-1] == 50
     coordinator.set_speaking(area.id, True, "Ich bin Jarvis, Ihr Butler.")
@@ -270,6 +270,7 @@ class Server:
     def __init__(self, music):
         self.music = music
         self.paused = []
+        self.played = []
 
     def music_playing(self, player):
         return self.music.get(player, False)
@@ -277,8 +278,11 @@ class Server:
     async def pause(self, player):
         self.paused.append(player)
 
+    async def play(self, player):
+        self.played.append(player)
 
-def test_cutting_an_announcement_leaves_music_zones_alone(house):
+
+def test_cutting_an_announcement_pauses_every_zone_and_resumes_music(house):
     servers = Audioservers(house.settings, house.miniserver, house.events)
     server = Server({1: True})
     servers.client_for = lambda player: server
@@ -293,4 +297,5 @@ def test_cutting_an_announcement_leaves_music_zones_alone(house):
         return await servers.cut(announcement, wait=0.5)
 
     assert asyncio.run(go())
-    assert server.paused == [2]
+    assert server.paused == [1, 2]
+    assert server.played == [1]

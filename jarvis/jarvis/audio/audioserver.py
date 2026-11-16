@@ -403,6 +403,10 @@ class AudioserverClient:
         await self.ensure_ready()
         await self._command(f"audio/{player}/pause", "pause_result", timeout=3.0)
 
+    async def play(self, player: int) -> None:
+        await self.ensure_ready()
+        await self._command(f"audio/{player}/play", "play_result", timeout=3.0)
+
     def public(self) -> dict:
         return {"name": self.name, "host": self.address, "status": self.status, "error": self.error}
 
@@ -613,33 +617,37 @@ class Audioservers:
     async def cut(self, announcement: Announcement, wait: float = 1.5) -> bool:
         """Try to end an announcement early. True when every zone stopped speaking.
 
-        The Audioserver has no documented stop for an uploaded announcement. A pause
-        is sent only to zones without music: there it can at most end the announcement,
-        while in a zone with music it might leave the music paused afterwards.
+        The Audioserver has no documented stop for an uploaded announcement. Pause
+        is the closest command. Zones that were playing music are started again
+        once the announcement has ended, so the music does not stay paused.
         """
-        quiet: list[int] = []
-        busy: list[int] = []
+        paused: list[int] = []
+        resume: list[tuple[AudioserverClient, int]] = []
         for player in sorted(announcement.players):
             client = self.client_for(player)
             if client is None:
                 continue
-            if client.music_playing(player):
-                busy.append(player)
-                continue
+            had_music = client.music_playing(player)
             try:
                 await client.pause(player)
-                quiet.append(player)
             except Exception as exc:  # noqa: BLE001
                 log.info("pause on player %s failed: %s", player, exc)
+                continue
+            paused.append(player)
+            if had_music:
+                resume.append((client, player))
         try:
             await asyncio.wait_for(announcement.finished.wait(), timeout=wait)
             stopped = True
         except asyncio.TimeoutError:
             stopped = False
         if stopped:
-            self.events.log("audio", "Durchsage abgebrochen", ", ".join(f"Player {p}" for p in quiet))
-        elif busy and not quiet:
-            self.events.log("audio", "Durchsage läuft zu Ende", "In der Zone läuft Musik, Jarvis bricht dort nicht ab")
+            for client, player in resume:
+                try:
+                    await client.play(player)
+                except Exception as exc:  # noqa: BLE001
+                    log.info("resume on player %s failed: %s", player, exc)
+            self.events.log("audio", "Durchsage abgebrochen", ", ".join(f"Player {p}" for p in paused))
         else:
             self.events.log("audio", "Durchsage läuft zu Ende", "Der Audioserver hat die Pause während der Durchsage ignoriert")
         return stopped
