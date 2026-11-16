@@ -17,6 +17,8 @@ from jarvis.audio.audioserver import (
     Audioservers,
     build_authenticate,
     parse_hosts,
+    player_names_from,
+    resolve_player,
     search_command,
     search_items,
     service_accounts,
@@ -183,3 +185,61 @@ def test_announcement_is_split_per_audioserver():
     combined = asyncio.new_event_loop().run_until_complete(scenario())
     assert sent == {"192.168.1.40": [(1, 40)], "192.168.1.41": [(7, 30)]}
     assert combined.players == {1, 7}
+
+
+def test_a_repeated_player_id_stays_on_the_zones_own_server():
+    pool = _pool()
+    sent = {}
+
+    def fake(host):
+        async def announce(targets, wav_bytes):
+            sent[host] = targets
+            ann = Announcement(f"{host}.wav", {p for p, _ in targets})
+            ann.began.set()
+            return ann
+
+        return announce
+
+    for host, client in pool.clients.items():
+        client.announce = fake(host)
+
+    asyncio.new_event_loop().run_until_complete(pool.announce([(1, 40, "192.168.1.41")], b"RIFF"))
+    assert sent == {"192.168.1.41": [(1, 40)]}
+
+
+def test_wohnzimmer_uses_the_player_the_audioserver_calls_wohnzimmer():
+    assert resolve_player({2: "Esszimmer", 4: "Wohnzimmer"}, "Wohnzimmer", "Wohnzimmer", 2) == 4
+    assert resolve_player({4: "Wohnzimmer"}, "Wohnzimmer", "Wohnzimmer", 4) == 4
+    assert resolve_player({}, "Wohnzimmer", "Wohnzimmer", 2) == 2
+    assert resolve_player({3: "Küche", 4: "Wohnzimmer"}, "Küche", "Wohnzimmer", 3) == 3
+    assert resolve_player({2: "Esszimmer", 4: "Wohnzimmer"}, "Audio", "Wohnzimmer", 2) == 4
+    assert player_names_from({"players": [{"playerid": 4, "name": "Wohnzimmer"}, {"name": "Album", "id": "spotify:1"}]}) == [
+        (4, "Wohnzimmer")
+    ]
+
+
+def test_events_remember_the_name_the_audioserver_uses():
+    client = AudioserverClient("192.168.1.40", miniserver=_Stub(), events=_Events())
+    client._on_events([{"playerid": 4, "name": "Wohnzimmer", "mode": "stop"}])
+    assert client.player_names[4] == "Wohnzimmer"
+
+
+def test_player_for_corrects_a_structure_id_that_belongs_to_another_room():
+    structure = {
+        "mediaServer": {"as": {"type": 2, "name": "Audioserver", "host": "192.168.1.40:7091"}},
+        "controls": {
+            "z-wohn": {"name": "Wohnzimmer", "type": "AudioZoneV2", "uuidAction": "z-wohn", "room": "r-wohn", "details": {"playerid": 2, "server": "as"}},
+            "z-ess": {"name": "Esszimmer", "type": "AudioZoneV2", "uuidAction": "z-ess", "room": "r-ess", "details": {"playerid": 4, "server": "as"}},
+        },
+        "rooms": {"r-wohn": {"name": "Wohnzimmer"}, "r-ess": {"name": "Esszimmer"}},
+    }
+    pool = _pool(structure)
+    client = pool.clients["192.168.1.40"]
+    client._ready.set()
+    client._players_fresh = True
+    client._player_names = {2: "Esszimmer", 4: "Wohnzimmer"}
+    zone = pool.miniserver.structure.controls["z-wohn"]
+
+    player, host = asyncio.new_event_loop().run_until_complete(pool.player_for(zone))
+    assert player == 4
+    assert host == "192.168.1.40"

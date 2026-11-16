@@ -60,17 +60,16 @@ class Speech:
 
     async def say(self, text: str, lang: str, areas: list[Area]) -> bool:
         """Returns True when the Audioserver confirmed the announcement."""
-        targets: list[tuple[int, int]] = []
-        speaking: list[Area] = []
+        chosen: list[tuple[Area, object]] = []
         for area in areas:
             zone = self.house.zone_of(area)
             if zone is None or zone.details.get("playerid") is None:
                 continue
-            targets.append((int(zone.details["playerid"]), self._volume(area)))
-            speaking.append(area)
-        if not targets:
+            chosen.append((area, zone))
+        if not chosen:
             self.house.events.log("audio", "Keine Audio-Zone für die Antwort", ", ".join(a.name for a in areas))
             return False
+        speaking = [area for area, _ in chosen]
         locks = [self._locks.setdefault(a.id, asyncio.Lock()) for a in speaking]
         for lock in locks:
             await lock.acquire()
@@ -79,10 +78,24 @@ class Speech:
         for area in speaking:
             self._cuts[area.id] = cut
         try:
+            # The Audioserver connection and the voice are prepared together.
+            # After a pause the first reply otherwise waits while the link is rebuilt.
+            warming = [asyncio.ensure_future(self.house.audioserver.warm(zone)) for _, zone in chosen]
             render_started = time.monotonic()
-            pcm = await self.render(text, lang)
+            try:
+                pcm = await self.render(text, lang)
+            finally:
+                for task in warming:
+                    try:
+                        await task
+                    except Exception:  # noqa: BLE001
+                        log.debug("audioserver warm failed", exc_info=True)
             if cut.is_set():
                 return False
+            targets: list[tuple[int, int, str | None]] = []
+            for area, zone in chosen:
+                player, host = await self.house.audioserver.player_for(zone)
+                targets.append((player, self._volume(area), host))
             for area in speaking:
                 coordinator.set_speaking(area.id, True, text)
             started = time.monotonic()

@@ -145,6 +145,10 @@ class Coordinator:
         offer = session.offer(mic.id, wake_word is not None)
         if offer == Offer.REJECT:
             return None
+        if offer != Offer.FOLLOWUP:
+            # A new wake is the slow path: the Audioserver link may have gone idle.
+            # Open it while the sentence is still being spoken.
+            self._warm_audio(mic.area_id)
         if not busy:
             self._replace_run(mic.id)
         noise = int(self.house.settings.get("mic.noise_filter"))
@@ -164,6 +168,15 @@ class Coordinator:
                 asyncio.get_running_loop().call_later(ARBITRATION_WINDOW, self._decide, area_id)
         self._phase(mic.area_id)
         return 0
+
+    def _warm_audio(self, area_id: str | None) -> None:
+        if not area_id:
+            return
+        area = self.house.areas.get(area_id)
+        zone = self.house.zone_of(area) if area is not None else None
+        if zone is None:
+            return
+        self.house.background(self.house.audioserver.warm(zone), "audio-warm")
 
     def _generation(self, area_id: str) -> int:
         return self._gen.get(area_id, 0)

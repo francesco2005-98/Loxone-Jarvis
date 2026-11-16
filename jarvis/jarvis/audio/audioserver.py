@@ -39,6 +39,9 @@ log = logging.getLogger(__name__)
 PORT = 7091
 UPLOAD_RATE = 24000
 UPLOADED_LIMIT = 5000
+# A kept HTTP connection the Audioserver has already dropped otherwise blocks the
+# first announcement after a pause for the whole request timeout.
+HTTP_IDLE_S = 15.0
 
 
 class AudioserverError(RuntimeError):
@@ -92,6 +95,10 @@ class AudioserverClient:
         self._music: dict[int, bool] = {}
         self._uploaded: set[str] = set()
         self._http: aiohttp.ClientSession | None = None
+        self._http_used = 0.0
+        self._player_names: dict[int, str] = {}
+        self._players_fresh = False
+        self._players_retry = 0.0
         self._listeners: list[Callable[[int, bool], None]] = []
         self._task: asyncio.Task | None = None
         self._kick = asyncio.Event()
@@ -126,6 +133,10 @@ class AudioserverClient:
     def connected(self) -> bool:
         return self._ready.is_set()
 
+    @property
+    def player_names(self) -> dict[int, str]:
+        return self._player_names
+
     async def _run(self) -> None:
         backoff = 2.0
         while True:
@@ -150,6 +161,8 @@ class AudioserverClient:
                 self.error = str(exc)[:200]
             finally:
                 self._ready.clear()
+                self._players_fresh = False
+                self._players_retry = 0.0
                 self._fail_waiters(AudioserverError("Verbindung getrennt"))
                 self._ws = None
             await self._sleep(backoff)
@@ -165,7 +178,7 @@ class AudioserverClient:
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=10)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             ws = await http.ws_connect(
-                f"ws://{host}:{PORT}/", protocols=("remotecontrol",), heartbeat=None, max_msg_size=0
+                f"ws://{host}:{PORT}/", protocols=("remotecontrol",), heartbeat=30, max_msg_size=0
             )
             self._ws = ws
             try:
@@ -183,6 +196,10 @@ class AudioserverClient:
                     self.error = None
                     self._ready.set()
                     self.events.log("audio", f"Audioserver {self.name} angemeldet", host)
+                    try:
+                        await asyncio.wait_for(self.learn_players(), timeout=3)
+                    except Exception as exc:  # noqa: BLE001
+                        log.info("player list from %s not loaded: %s", host, exc)
                     await reader
                 finally:
                     reader.cancel()
@@ -265,6 +282,9 @@ class AudioserverClient:
                 player = int(item["playerid"])
             except (TypeError, ValueError):
                 continue
+            heard = item.get("name")
+            if isinstance(heard, str) and heard.strip():
+                self._player_names[player] = heard.strip()
             eventype = item.get("eventype")
             path = str(item.get("audiopath") or "")
             if not eventype:
@@ -296,13 +316,36 @@ class AudioserverClient:
 
     # -------------------------------------------------------------- public
     async def ensure_ready(self, timeout: float = 4.0) -> None:
-        if self._ready.is_set():
+        socket_open = self._ws is not None and not self._ws.closed
+        # Unit tests mark a client ready without a socket. A running connection
+        # whose socket already closed has to sign in again, or the first command
+        # after a pause waits until the send times out.
+        if self._ready.is_set() and (socket_open or self._task is None):
             return
+        if self._task is None:
+            raise AudioserverError(self.error or "Audioserver nicht verbunden")
+        self._ready.clear()
         self._kick.set()
+        if socket_open:
+            await self._ws.close()
         try:
             await asyncio.wait_for(self._ready.wait(), timeout=timeout)
         except asyncio.TimeoutError as exc:
             raise AudioserverError(self.error or "Audioserver nicht verbunden") from exc
+
+    async def learn_players(self) -> None:
+        """Names the Audioserver itself uses. The structure file's player id can point at another room."""
+        if self._players_fresh or time.monotonic() < self._players_retry:
+            return
+        try:
+            result = await self._command("audio/cfg/getplayersdetails", "getplayersdetails_result", timeout=3.0)
+        except Exception:
+            # Don't spend this wait on every sentence when the server has no such command.
+            self._players_retry = time.monotonic() + 120
+            raise
+        for player, label in player_names_from(result):
+            self._player_names[player] = label
+        self._players_fresh = True
 
     async def announce(self, targets: list[tuple[int, int]], wav: bytes) -> Announcement:
         """Play WAV (mono, 24 kHz) as announcement on (player_id, volume) targets.
@@ -334,20 +377,39 @@ class AudioserverClient:
             await self._play(filename, targets)
         return announcement
 
+    async def _open_http(self) -> aiohttp.ClientSession:
+        stale = self._http_used > 0 and time.monotonic() - self._http_used > HTTP_IDLE_S
+        if self._http is None or self._http.closed or stale:
+            old = self._http
+            timeout = aiohttp.ClientTimeout(total=8, connect=3, sock_connect=3, sock_read=5)
+            self._http = aiohttp.ClientSession(timeout=timeout)
+            self._http_used = 0.0
+            if old is not None and not old.closed:
+                await old.close()
+        return self._http
+
+    async def _drop_http(self) -> None:
+        old = self._http
+        self._http = None
+        self._http_used = 0.0
+        if old is not None and not old.closed:
+            await old.close()
+
     async def _upload(self, filename: str, wav: bytes) -> None:
         url = f"http://{self.host()}:{PORT}/audio/cfg/upload/audioupload/add/{filename}"
         headers = {"Content-Type": "audio/wav", "Accept-Encoding": "identity"}
         for attempt in (1, 2):
-            if self._http is None or self._http.closed:
-                self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
+            session = await self._open_http()
             try:
-                async with self._http.put(url, data=wav, headers=headers) as resp:
+                async with session.put(url, data=wav, headers=headers) as resp:
                     if resp.status // 100 != 2:
                         raise AudioserverError(f"Upload abgelehnt ({resp.status})")
                     await resp.content.read(1024)
+                self._http_used = time.monotonic()
                 break
-            except aiohttp.ClientConnectionError:
-                # A kept-alive connection the server has closed meanwhile.
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                # A kept-alive connection the server closed while Jarvis was idle.
+                await self._drop_http()
                 if attempt == 2:
                     raise
         if len(self._uploaded) >= UPLOADED_LIMIT:
@@ -357,9 +419,16 @@ class AudioserverClient:
     async def _play(self, filename: str, targets: list[tuple[int, int]]) -> None:
         async def one(player: int, volume: int) -> None:
             volume = max(1, min(100, int(volume)))
-            result = await self._command(
-                f"audio/grouped/playuploadedfile/{filename}/{player}#{volume}", "playuploadedfile_result"
-            )
+            # The current app addresses the player and the volume as separate path
+            # segments. The older "player#volume" form is only a fallback: on some
+            # servers the hash is not a player id, and the file then starts in the
+            # first zone.
+            command = f"audio/grouped/playuploadedfile/{filename}/{player}/{volume}"
+            result = await self._command(command, "playuploadedfile_result")
+            if result is not True:
+                result = await self._command(
+                    f"audio/grouped/playuploadedfile/{filename}/{player}#{volume}", "playuploadedfile_result"
+                )
             if result is not True:
                 raise AudioserverError(f"Ansage in Zone {player} nicht bestätigt")
 
@@ -411,6 +480,70 @@ class AudioserverClient:
         return {"name": self.name, "host": self.address, "status": self.status, "error": self.error}
 
 
+def _norm_name(value: str) -> str:
+    text = value.casefold().replace("ß", "ss")
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text).split())
+
+
+def resolve_player(names: dict[int, str], zone_name: str, room: str | None, fallback: int | None) -> int | None:
+    """The player the Audioserver calls by this zone's name, else the structure id.
+
+    Wohnzimmer in the structure can carry Esszimmer's player id. The name in the
+    Audioserver's own player list is what actually comes out of the speakers.
+    """
+    indexed: dict[str, list[int]] = {}
+    for player, label in names.items():
+        key = _norm_name(label)
+        if key:
+            indexed.setdefault(key, []).append(player)
+
+    def pick(key: str) -> int | None:
+        found = indexed.get(key) or []
+        if not found:
+            return None
+        if fallback in found:
+            return fallback
+        return found[0] if len(found) == 1 else None
+
+    zone_key = _norm_name(zone_name)
+    chosen = pick(zone_key) if zone_key else None
+    if chosen is not None:
+        return chosen
+    known = _norm_name(names.get(fallback, "")) if fallback is not None else ""
+    room_key = _norm_name(room or "")
+    # The structure id is present under some other name. Use the room only when
+    # that name is not already the room, so "Audio · Wohnzimmer" can still match.
+    if room_key and room_key != zone_key and room_key != known:
+        room_pick = pick(room_key)
+        if room_pick is not None:
+            return room_pick
+    return fallback
+
+
+def player_names_from(result: object) -> list[tuple[int, str]]:
+    """(player id, zone name) pairs from whatever getplayersdetails returns."""
+    found: list[tuple[int, str]] = []
+    seen: set[int] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            raw = node.get("playerid")
+            label = node.get("name")
+            if isinstance(label, str) and str(raw).lstrip("-").isdigit():
+                player = int(raw)
+                if player > 0 and player not in seen and label.strip():
+                    seen.add(player)
+                    found.append((player, label.strip()))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(result)
+    return found
+
+
 def parse_hosts(value: str | None) -> list[str]:
     """Manual addresses, separated by comma, semicolon or whitespace."""
     out: list[str] = []
@@ -438,6 +571,7 @@ class Audioservers:
         self.events = events
         self.clients: dict[str, AudioserverClient] = {}
         self._seen: dict[int, str] = {}
+        self._corrections: set[tuple[str, int, int]] = set()
         self._listeners: list[Callable[[int, bool], None]] = []
         self._started = False
         self._task: asyncio.Task | None = None
@@ -584,12 +718,82 @@ class Audioservers:
 
         return list(await asyncio.gather(*(one(c) for c in self.clients.values())))
 
-    async def announce(self, targets: list[tuple[int, int]], wav: bytes) -> Announcement:
-        """Play the WAV on every target, each through the Audioserver of its zone."""
+    def client_for_host(self, host: str | None, player: int) -> AudioserverClient | None:
+        """The zone's own server. Player ids repeat across Audioservers, so the first match is not enough."""
+        if host in self.clients:
+            return self.clients[host]
+        return self.client_for(player)
+
+    async def player_for(self, zone: object) -> tuple[int, str | None]:
+        """Player id and server host for a Loxone zone.
+
+        The id in the structure file is used when the Audioserver calls that
+        player by the same name. Otherwise the player that actually bears the
+        zone's name is used, so Wohnzimmer is not announced in Esszimmer.
+        """
+        details = getattr(zone, "details", None) or {}
+        raw = details.get("playerid")
+        if raw is None or not str(raw).lstrip("-").isdigit():
+            raise AudioserverError("Diese Zone hat keinen Player")
+        fallback = int(raw)
+        structure = getattr(self.miniserver, "structure", None)
+        host = structure.zone_server_host(zone) if structure is not None and hasattr(structure, "zone_server_host") else None
+        client = self.client_for_host(host, fallback)
+        if client is None or not client.connected:
+            return fallback, host
+        try:
+            await client.learn_players()
+        except Exception as exc:  # noqa: BLE001
+            log.info("player list not loaded: %s", exc)
+            return fallback, client.address
+        resolved = resolve_player(
+            client.player_names, getattr(zone, "name", "") or "", getattr(zone, "room", None), fallback
+        )
+        if resolved is None:
+            resolved = fallback
+        if resolved != fallback:
+            noted = (str(getattr(zone, "name", "")), fallback, resolved)
+            if noted not in self._corrections:
+                self._corrections.add(noted)
+                self.events.log(
+                    "audio",
+                    f"Zone {noted[0]}",
+                    f"Player {resolved} ({client.player_names.get(resolved, 'ohne Namen')}), "
+                    f"nicht Player {fallback} ({client.player_names.get(fallback, 'ohne Namen')})",
+                )
+        return resolved, client.address
+
+    async def warm(self, zone: object) -> None:
+        """Have the zone's Audioserver signed in and its upload connection open before the reply exists."""
+        try:
+            player, host = await self.player_for(zone)
+        except AudioserverError:
+            return
+        client = self.client_for_host(host, player)
+        if client is None:
+            return
+        try:
+            await client.ensure_ready(timeout=3)
+        except AudioserverError:
+            return
+        try:
+            await client.learn_players()
+        except Exception:  # noqa: BLE001
+            log.debug("player list while warming", exc_info=True)
+
+    async def announce(self, targets: list[tuple], wav: bytes) -> Announcement:
+        """Play the WAV on every target, each through the Audioserver of its zone.
+
+        A target is (player, volume) or (player, volume, host). The host is the
+        server of the zone that was chosen; without it, player ids that exist on
+        more than one Audioserver can land in the wrong house.
+        """
         groups: dict[str, list[tuple[int, int]]] = defaultdict(list)
         missing: list[int] = []
-        for player, volume in targets:
-            client = self.client_for(player)
+        for item in targets:
+            player, volume = int(item[0]), int(item[1])
+            host = item[2] if len(item) > 2 else None
+            client = self.client_for_host(host, player)
             if client is None:
                 missing.append(player)
             else:
