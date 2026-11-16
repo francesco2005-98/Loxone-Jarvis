@@ -73,6 +73,88 @@ def test_the_board_run_ends_in_one_message(house):
     assert mic.id not in coordinator.runs
 
 
+def test_a_new_command_while_thinking_discards_the_old_answer(house):
+    area = house.areas.create("Wohnen")
+    mic = board(house, area.id)
+    record_events(house)
+    coordinator = house.coordinator
+    started = asyncio.Event()
+    handled = []
+
+    async def handle_text(session, area_, text, lang, person_id, origin="", followup=False):
+        handled.append((text, followup))
+        if text == "alt":
+            started.set()
+            await asyncio.sleep(0.3)
+            return "alte Antwort", []
+        return "neue Antwort", []
+
+    async def say(text, lang, areas):
+        handled.append(("say", text))
+        return True
+
+    coordinator.handle_text = handle_text
+    house.speech.say = say
+
+    async def scenario():
+        from jarvis.voice.coordinator import Run
+        from jarvis.voice.vad import Endpointer
+
+        async def transcribe(audio):
+            return audio, Transcript("alt", "de", 0.0, 0.0)
+
+        coordinator._transcribe = transcribe
+        run = Run(mic, area.id, "command", Endpointer(), gen=0)
+        task = asyncio.create_task(coordinator._process(run, b"\0" * 4000))
+        await started.wait()
+        assert await coordinator.on_start(mic, "conv", "jarvis") == 0
+        await task
+        return task
+
+    asyncio.run(scenario())
+    assert ("say", "alte Antwort") not in handled
+    assert coordinator.session(area.id).phase == Phase.LISTENING
+
+
+def test_a_followup_that_starts_with_jarvis_is_a_new_command(house):
+    area = house.areas.create("Wohnen")
+    mic = board(house, area.id)
+    coordinator = house.coordinator
+    seen = {}
+
+    async def handle_text(session, area_, text, lang, person_id, origin="", followup=False):
+        seen["text"] = text
+        seen["followup"] = followup
+        return "Erledigt.", []
+
+    async def say(*a, **k):
+        return True
+
+    async def transcribe(audio):
+        return audio, Transcript("Jarvis, Licht aus", "de", 0.0, 0.0)
+
+    coordinator.handle_text = handle_text
+    coordinator._transcribe = transcribe
+    house.speech.say = say
+    house.mics.listen = lambda mic_: _done()
+
+    async def go():
+        from jarvis.voice.coordinator import Run
+        from jarvis.voice.vad import Endpointer
+
+        run = Run(mic, area.id, "followup", Endpointer(), gen=0)
+        await coordinator._process(run, b"\0" * 4000)
+
+    asyncio.run(go())
+    assert seen == {"text": "Licht aus", "followup": False}
+
+
+def _done():
+    fut = asyncio.get_running_loop().create_future()
+    fut.set_result(True)
+    return fut
+
+
 def test_saying_jarvis_while_he_speaks_interrupts_him(house):
     area = house.areas.create("Wohnen")
     mic = board(house, area.id)

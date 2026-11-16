@@ -21,7 +21,7 @@ from ..audio import wav
 from .arbitration import AreaSession
 from .stt import KROKO
 from .vad import FRAME_BYTES, Endpointer, VadConfig, high_pass
-from .wake import WAKE
+from .wake import has_words, split_wake
 
 if TYPE_CHECKING:
     from ..house import House
@@ -36,25 +36,9 @@ PREROLL_FRAMES = 10
 EARLY_CHECKS_MS = (700, 1400)
 SPECULATE_MS = 250
 UTTERANCE_SECONDS = 12.0
-WAKE_LEAD = 24
-
-
 def early_model(model: str) -> str:
     """Kroko is fast enough for the early check; with Whisper the small base model does it."""
     return KROKO if model == KROKO else "base"
-
-
-def split_wake(text: str) -> tuple[bool, str]:
-    """(woke, rest): the wake word near the start of the sentence and what follows it."""
-    match = WAKE.search(text or "")
-    if match is None or match.start() > WAKE_LEAD:
-        return False, ""
-    rest = text[match.end() :].strip(" \t,.;:!?-–—\"'„“")
-    return True, rest
-
-
-def _has_words(text: str) -> bool:
-    return sum(ch.isalpha() for ch in text) >= 2
 
 
 class Segmenter:
@@ -153,6 +137,8 @@ class LiveSession:
         self._spec: tuple[tuple[int, int], asyncio.Future] | None = None
         self._early_segment = 0
         self._early_step = 0
+        self._job: asyncio.Task | None = None
+        self._gen = 0
 
     # ----------------------------------------------------------- browser
     def _resolve_area(self, area_id: str | None) -> Area:
@@ -173,11 +159,13 @@ class LiveSession:
             self._played.set()
 
     def feed(self, data: bytes) -> None:
-        if self.phase in ("thinking", "speaking"):
-            return
+        # Audio keeps flowing while Jarvis thinks or speaks, so a new "Jarvis" can cut him off.
         self.segmenter.config.end_silence_ms = int(self.house.settings.get("voice.end_silence_ms"))
+        busy = self.phase in ("thinking", "speaking")
         for item in self.segmenter.feed(data):
             self._enqueue(item)
+        if busy:
+            return
         self._maybe_early()
         self._speculate()
 
@@ -292,7 +280,7 @@ class LiveSession:
         await self.send({"type": "state", "phase": self.phase})
         while True:
             timeout = None
-            if self.phase in ("listening", "followup"):
+            if self.phase in ("listening", "followup") and (self._job is None or self._job.done()):
                 timeout = max(0.05, self.until - time.monotonic())
             try:
                 segment, key = await asyncio.wait_for(self.queue.get(), timeout)
@@ -300,16 +288,69 @@ class LiveSession:
                 self.session.reset()
                 await self._state("idle")
                 continue
-            try:
-                await self._segment(segment, key)
-            except asyncio.CancelledError:
-                raise
-            except Exception:  # noqa: BLE001
-                log.exception("live segment failed")
-                await self.send({"type": "error", "text": "Das hat nicht geklappt."})
-                await self._end()
+            self._dispatch(segment, key)
 
-    async def _segment(self, pcm: bytes, key: tuple[int, int] | None = None) -> None:
+    def _dispatch(self, segment: bytes, key: tuple[int, int]) -> None:
+        if self._job and not self._job.done() and self.phase in ("thinking", "speaking"):
+            asyncio.create_task(self._preempt(segment, key))
+            return
+        self._gen += 1
+        gen = self._gen
+        self._job = asyncio.create_task(self._guarded(segment, key, gen))
+
+    async def _guarded(self, segment: bytes, key: tuple[int, int], gen: int) -> None:
+        try:
+            await self._segment(segment, key, gen)
+        except asyncio.CancelledError:
+            return
+        except Exception:  # noqa: BLE001
+            if self._gen != gen:
+                return
+            log.exception("live segment failed")
+            await self.send({"type": "error", "text": "Das hat nicht geklappt."})
+            await self._end()
+
+    async def _preempt(self, segment: bytes, key: tuple[int, int]) -> None:
+        """A sentence spoken while Jarvis is busy. Only "Jarvis" replaces what he is doing."""
+        try:
+            transcript = await self._transcribe(segment)
+        except Exception:  # noqa: BLE001
+            log.debug("interrupt transcription failed", exc_info=True)
+            return
+        if self.phase not in ("thinking", "speaking"):
+            # He finished while we were listening: the sentence is an ordinary next command.
+            self._dispatch(segment, key)
+            return
+        if not transcript.usable:
+            return
+        woke, rest = split_wake(transcript.text)
+        if not woke:
+            return
+        self._gen += 1
+        gen = self._gen
+        if self._job and not self._job.done():
+            self._job.cancel()
+        self.session.interrupt()
+        await self.send({"type": "stop"})
+        self.house.events.log("voice", "Live unterbrochen", rest[:80])
+        if not has_words(rest):
+            await self._state("listening", time.monotonic() + LISTEN_SECONDS)
+            return
+        self._job = asyncio.create_task(self._guarded_text(rest, transcript.lang, segment, gen))
+
+    async def _guarded_text(self, text: str, lang: str, pcm: bytes, gen: int) -> None:
+        try:
+            await self._handle(text, lang, pcm, followup=False, gen=gen)
+        except asyncio.CancelledError:
+            return
+        except Exception:  # noqa: BLE001
+            if self._gen != gen:
+                return
+            log.exception("live segment failed")
+            await self.send({"type": "error", "text": "Das hat nicht geklappt."})
+            await self._end()
+
+    async def _segment(self, pcm: bytes, key: tuple[int, int] | None = None, gen: int | None = None) -> None:
         if self.phase == "listening":
             self.until = min(self.until, time.monotonic() + LISTEN_SECONDS)
         started = time.monotonic()
@@ -328,27 +369,36 @@ class LiveSession:
         if self.phase == "idle":
             if not woke:
                 return
-            if not _has_words(rest):
+            if not has_words(rest):
                 await self.send({"type": "heard", "text": transcript.text})
                 await self._state("listening", time.monotonic() + LISTEN_SECONDS)
                 return
             text = rest
         else:
-            if woke and not _has_words(rest):
+            if woke and not has_words(rest):
                 await self._state("listening", time.monotonic() + LISTEN_SECONDS)
                 return
             text = rest if woke else transcript.text
-        await self._handle(text, transcript.lang, pcm, followup)
+        await self._handle(text, transcript.lang, pcm, followup, gen)
 
-    async def _handle(self, text: str, lang: str, pcm: bytes, followup: bool = False) -> None:
+    def _current(self, gen: int | None) -> bool:
+        return gen is None or self._gen == gen
+
+    async def _handle(self, text: str, lang: str, pcm: bytes, followup: bool = False, gen: int | None = None) -> None:
         house = self.house
         coordinator = house.coordinator
+        if not self._current(gen):
+            return
         await self._state("thinking")
         started = time.monotonic()
         person_id = await asyncio.to_thread(coordinator._identify, pcm)
+        if not self._current(gen):
+            return
         reply, done = await coordinator.handle_text(
             self.session, self.area, text, lang, person_id, origin="live", followup=followup
         )
+        if not self._current(gen):
+            return
         if not reply:
             house.events.log("voice", f"Live, nicht an Jarvis: „{text}“", "Gespräch beendet")
             await self._end()
@@ -375,15 +425,22 @@ class LiveSession:
         await self._state("speaking")
         await self.send({"type": "reply", "text": reply, "actions": done, "audio": audio})
         await self._wait_played(audio, duration)
+        if not self._current(gen):
+            return
         offer = await coordinator.take_suggestion(self.session)
+        if not self._current(gen):
+            return
         if offer is not None:
             audio, duration = await self._render(offer.question, lang)
             self._played.clear()
             await self.send({"type": "reply", "text": offer.question, "actions": [], "audio": audio})
             await self._wait_played(audio, duration)
-        self.segmenter.reset()
-        while not self.queue.empty():
-            self.queue.get_nowait()
+            if not self._current(gen):
+                return
+        # A sentence already spoken during the answer stays queued. Only drop the
+        # tail of this device's own voice when the user is not already talking.
+        if not self.segmenter.speaking:
+            self.segmenter.reset()
         seconds = float(self.house.settings.get("voice.followup_s"))
         if self.session.pending is not None:
             seconds = max(seconds, 6.0)

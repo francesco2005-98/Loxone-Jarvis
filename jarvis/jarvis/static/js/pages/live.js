@@ -52,6 +52,8 @@ export default function live(view, ctx) {
   let menuTimer = 0;
   let wakeLock = null;
   let playing = Promise.resolve();
+  let sourceNode = null;
+  let playGen = 0;
   let fullscreen = false;
   let noise = VOICE_FLOOR;
   let voicePackets = 0;
@@ -214,7 +216,7 @@ export default function live(view, ctx) {
       const { pcm, level } = event.data;
       hearLocally(level);
       if (phase === "listening" || phase === "followup") ctx.liveLevel(level * 3);
-      if (!muted && ws && ws.readyState === 1 && phase !== "thinking" && phase !== "speaking") ws.send(pcm);
+      if (!muted && ws && ws.readyState === 1) ws.send(pcm);
     };
     await audio.resume().catch(() => {});
     if (audio.state !== "running") {
@@ -251,6 +253,8 @@ export default function live(view, ctx) {
   function onMessage(msg) {
     if (msg.type === "state") {
       setPhase(msg.phase);
+    } else if (msg.type === "stop") {
+      stopPlayback();
     } else if (msg.type === "reply") {
       if (msg.audio) enqueue(msg.audio, true);
       else ws.send(JSON.stringify({ type: "played" }));
@@ -260,24 +264,44 @@ export default function live(view, ctx) {
   }
 
   // ----------------------------------------------------------- speaker
+  function stopPlayback() {
+    playGen += 1;
+    muted = false;
+    const src = sourceNode;
+    sourceNode = null;
+    if (!src) return;
+    const done = src.onended;
+    src.onended = null;
+    try {
+      src.stop();
+    } catch {
+      /* already stopped */
+    }
+    if (done) done();
+  }
+
   function enqueue(b64, ack) {
-    playing = playing.then(() => play(b64)).catch(() => {}).then(() => {
-      if (ack && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "played" }));
+    const gen = playGen;
+    playing = playing.catch(() => {}).then(() => play(b64, gen)).catch(() => {}).then(() => {
+      if (ack && gen === playGen && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "played" }));
     });
   }
 
-  async function play(b64) {
-    if (!audio || stopped) return;
-    muted = true;
+  async function play(b64, gen) {
+    if (!audio || stopped || gen !== playGen) return;
+    // The microphone stays open, so "Jarvis" during the answer cuts it off.
+    // A short mute after the answer keeps the speaker's tail out of the next sentence.
     try {
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const buffer = await audio.decodeAudioData(bytes.buffer);
+      const buffer = await audio.decodeAudioData(bytes.buffer.slice(0));
+      if (gen !== playGen) return;
       const src = audio.createBufferSource();
       const analyser = audio.createAnalyser();
       analyser.fftSize = 512;
       src.buffer = buffer;
       src.connect(analyser);
       analyser.connect(audio.destination);
+      sourceNode = src;
       const data = new Float32Array(analyser.fftSize);
       let raf = 0;
       const meter = () => {
@@ -293,9 +317,13 @@ export default function live(view, ctx) {
         meter();
       });
       cancelAnimationFrame(raf);
+      if (sourceNode === src) sourceNode = null;
     } finally {
-      await new Promise((r) => setTimeout(r, 350));
-      muted = false;
+      if (gen === playGen) {
+        muted = true;
+        await new Promise((r) => setTimeout(r, 200));
+        if (gen === playGen) muted = false;
+      }
     }
   }
 

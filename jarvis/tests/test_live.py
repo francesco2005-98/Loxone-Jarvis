@@ -243,6 +243,37 @@ def test_pwa_files_and_ca_download(client, house):
     assert ca.headers["content-type"] == "application/x-x509-ca-cert"
 
 
+def test_jarvis_while_he_speaks_replaces_the_answer(house):
+    session, sent = _session(house)
+    handled = []
+    gate = asyncio.Event()
+
+    async def handle(text, lang, pcm, followup=False, gen=None):
+        handled.append(text)
+        if text == "alt":
+            await gate.wait()
+        session.phase = "followup"
+
+    session._handle = handle
+    house.stt.transcribe = lambda pcm, **kw: Transcript("Jarvis, Licht aus", "de", -0.2, 0.01)
+
+    async def scenario():
+        worker = asyncio.create_task(session.run())
+        session._gen = 1
+        session.phase = "speaking"
+        session._job = asyncio.create_task(session._handle("alt", "de", b"", False, 1))
+        await asyncio.sleep(0.02)
+        await session._preempt(b"\0" * 3200, (1, 1))
+        await asyncio.sleep(0.05)
+        worker.cancel()
+        gate.set()
+
+    run(scenario())
+    assert handled == ["alt", "Licht aus"]
+    assert {"type": "stop"} in sent
+    assert session._job.cancelled() or session.phase == "followup"
+
+
 def test_wake_word_is_noticed_while_still_speaking(house):
     models = []
 
@@ -281,7 +312,7 @@ def test_recognition_starts_in_the_pause_and_is_reused(house):
     session.until = time.monotonic() + 30
     handled = []
 
-    async def handle(text, lang, pcm, followup=False):
+    async def handle(text, lang, pcm, followup=False, gen=None):
         handled.append(text)
 
     session._handle = handle

@@ -22,7 +22,7 @@ from .arbitration import ARBITRATION_WINDOW, AreaSession, Offer, Phase, rms
 from .speaker import identify, profile_from
 from .correct import correct
 from .vad import Endpointer, VadConfig, high_pass
-from .wake import WAKE
+from .wake import WAKE, has_words, split_wake
 
 if TYPE_CHECKING:
     from ..house import House
@@ -58,6 +58,7 @@ class Run:
     started: float = field(default_factory=time.monotonic)
     spec: asyncio.Future | None = None
     spec_anchor: int = -1
+    gen: int = 0
 
 
 @dataclass
@@ -81,6 +82,7 @@ class Coordinator:
         self._declines: dict[str, list[tuple[float, str, str, str]]] = {}
         self._suggested_at: dict[str, float] = {}
         self._level_at: dict[str, float] = {}
+        self._gen: dict[str, int] = {}
 
     # ------------------------------------------------------------ helpers
     def session(self, area_id: str) -> AreaSession:
@@ -134,22 +136,25 @@ class Coordinator:
             self.house.events.log("mic", f"{mic.label} hat keinen Bereich", "Auf der Mikrofonseite zuordnen")
             return None
         session = self.session(mic.area_id)
-        if mic.area_id in self.speaking or session.phase == Phase.SPEAKING:
+        busy = mic.area_id in self.speaking or session.phase in (Phase.THINKING, Phase.SPEAKING)
+        if busy:
             if wake_word is None:
                 return None
-            self.interrupt(mic.area_id)
+            self.supersede(mic.area_id, keep=mic.id)
         self._unstick(session)
         offer = session.offer(mic.id, wake_word is not None)
         if offer == Offer.REJECT:
             return None
+        if not busy:
+            self._replace_run(mic.id)
         noise = int(self.house.settings.get("mic.noise_filter"))
         if offer == Offer.FOLLOWUP:
-            run = Run(mic, mic.area_id, "followup", Endpointer(self._vad(noise, True)), state="listening")
+            run = Run(mic, mic.area_id, "followup", Endpointer(self._vad(noise, True)), state="listening", gen=self._generation(mic.area_id))
             self.runs[mic.id] = run
             mics.send(mic, "RUN_START")
             mics.send(mic, "STT_START")
         else:
-            self.runs[mic.id] = Run(mic, mic.area_id, "command", Endpointer(self._vad(noise)))
+            self.runs[mic.id] = Run(mic, mic.area_id, "command", Endpointer(self._vad(noise)), gen=self._generation(mic.area_id))
             mics.send(mic, "RUN_START")
             if len(mics.in_area(mic.area_id)) <= 1:
                 # Nothing to compare. Waiting out the arbitration window only delays the sentence.
@@ -160,12 +165,44 @@ class Coordinator:
         self._phase(mic.area_id)
         return 0
 
-    def interrupt(self, area_id: str) -> None:
-        """ "Jarvis" while he talks: drop the rest of the answer and listen to the new sentence."""
+    def _generation(self, area_id: str) -> int:
+        return self._gen.get(area_id, 0)
+
+    def _fresh(self, area_id: str | None, gen: int) -> bool:
+        return area_id is not None and self._generation(area_id) == gen
+
+    def _replace_run(self, mic_id: str) -> None:
+        """The board opened a new stream. The previous one on this board must not finish later."""
+        old = self.runs.get(mic_id)
+        if old is None or old.state == "done":
+            return
+        old.state = "done"
+        if old.spec is not None:
+            old.spec.cancel()
+        self.runs.pop(mic_id, None)
+
+    def supersede(self, area_id: str, keep: str | None = None) -> None:
+        """A new sentence wins. The reply still being prepared or spoken is dropped."""
+        self._gen[area_id] = self._generation(area_id) + 1
+        self.speaking.discard(area_id)
+        self.house.mics.speaking(area_id, False)
         self.house.speech.interrupt(area_id)
         self.session(area_id).interrupt()
+        for mic_id, run in list(self.runs.items()):
+            if run.area_id != area_id or mic_id == keep or run.state == "done":
+                continue
+            run.state = "done"
+            if run.spec is not None:
+                run.spec.cancel()
+            self.house.mics.send(run.mic, "RUN_END")
+            self.runs.pop(mic_id, None)
+        self._replace_run(keep) if keep else None
         area = self.house.areas.get(area_id)
-        self.house.events.log("voice", "Jarvis unterbrochen", area.name if area else "")
+        self.house.events.log("voice", "Neuer Befehl, der laufende wird verworfen", area.name if area else "")
+
+    def interrupt(self, area_id: str) -> None:
+        """ "Jarvis" while he talks: drop the rest of the answer and listen to the new sentence."""
+        self.supersede(area_id)
 
     def _unstick(self, session: AreaSession) -> None:
         """A Bereich still collecting or listening without a live run (board gone mid-sentence) starts over."""
@@ -286,6 +323,11 @@ class Coordinator:
     def _finish(self, run: Run, result: str) -> None:
         if run.state == "done":
             return
+        if run.area_id and not self._fresh(run.area_id, run.gen):
+            # A newer sentence already owns the Bereich. Ending this stream would cut that one off.
+            run.state = "done"
+            self.runs.pop(run.mic.id, None)
+            return
         run.state = "done"
         # One RUN_END while the board still streams. After STT_VAD_END the board waits for a
         # RUN_END, but drops one that arrives while its microphone is still stopping, and then
@@ -335,6 +377,8 @@ class Coordinator:
         mics = house.mics
         session = self.session(run.area_id)
         area = house.areas.get(run.area_id)
+        if not self._fresh(run.area_id, run.gen):
+            return
         session.start_thinking()
         self._phase(run.area_id)
         started = time.monotonic()
@@ -358,11 +402,23 @@ class Coordinator:
             stt_ms = int((time.monotonic() - started) * 1000)
             if self.runs.get(run.mic.id) is run:
                 self.runs.pop(run.mic.id, None)
+            if not self._fresh(run.area_id, run.gen):
+                return
             if area is None or not transcript.usable:
                 session.reset()
                 self._phase(run.area_id)
                 return
-            if session.pending is None and _hush(transcript.text):
+            woke, rest = split_wake(transcript.text)
+            spoken = rest if woke else transcript.text
+            if woke and not has_words(rest):
+                # Just "Jarvis" again: keep the conversation and listen for the command.
+                session.woke()
+                seconds = float(house.settings.get("voice.followup_s")) or 8
+                session.open_followup(run.mic.id, seconds)
+                self._phase(area.id)
+                await mics.listen(run.mic)
+                return
+            if session.pending is None and _hush(spoken):
                 house.events.log("voice", f"„{transcript.text}“", "Jarvis schweigt")
                 session.reset()
                 self._phase(area.id)
@@ -371,8 +427,13 @@ class Coordinator:
             # known is used; otherwise the answer stays neutral.
             person_id = found.get("id")
             brain_started = time.monotonic()
-            followup = run.kind == "followup"
-            reply, done = await self.handle_text(session, area, transcript.text, transcript.lang, person_id, followup=followup)
+            # A follow-up that starts with "Jarvis" is a new command, not room talk.
+            followup = run.kind == "followup" and not woke
+            if not self._fresh(run.area_id, run.gen):
+                return
+            reply, done = await self.handle_text(session, area, spoken, transcript.lang, person_id, followup=followup)
+            if not self._fresh(run.area_id, run.gen):
+                return
             if not reply:
                 house.events.log("voice", f"Nicht an Jarvis: „{transcript.text}“", "Gespräch beendet")
                 session.reset()
@@ -384,15 +445,17 @@ class Coordinator:
             self.last = {
                 "ts": time.time(),
                 "area": area.name,
-                "text": transcript.text,
+                "text": spoken,
                 "reply": reply,
                 "actions": done,
                 "ms": latency,
                 "timing": {"stt": stt_ms, "brain": brain_ms},
             }
             house.events.publish({"type": "utterance", "utterance": self.last})
-            house.events.log("voice", f"„{transcript.text}“", reply[:200])
+            house.events.log("voice", f"„{spoken}“", reply[:200])
             if reply:
+                if not self._fresh(run.area_id, run.gen):
+                    return
                 session.start_speaking()
                 spoke_at = time.monotonic()
                 house.speech.last_timing = {}
@@ -400,14 +463,18 @@ class Coordinator:
                 self.last["timing"]["voice"] = house.speech.last_voice_ms
                 self.last["timing"].update(house.speech.last_timing)
                 house.events.publish({"type": "utterance", "utterance": self.last})
-                if house.speech.interrupted_since(area.id, spoke_at):
+                if not self._fresh(run.area_id, run.gen) or house.speech.interrupted_since(area.id, spoke_at):
                     # The new sentence after "Jarvis" owns the Bereich now.
                     return
                 offer = await self.take_suggestion(session)
+                if not self._fresh(run.area_id, run.gen):
+                    return
                 if offer is not None:
                     await house.speech.say(offer.question, transcript.lang, [area])
-                    if house.speech.interrupted_since(area.id, spoke_at):
+                    if not self._fresh(run.area_id, run.gen) or house.speech.interrupted_since(area.id, spoke_at):
                         return
+            if not self._fresh(run.area_id, run.gen):
+                return
             if session.phase in (Phase.SPEAKING, Phase.THINKING) and not session.keep_talking(
                 float(house.settings.get("voice.conversation_s"))
             ):
