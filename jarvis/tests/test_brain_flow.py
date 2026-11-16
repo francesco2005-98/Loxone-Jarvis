@@ -272,6 +272,14 @@ def test_thinking_level_only_for_gemini_3(setup):
     assert house.brain._thinking() is None
 
 
+def test_flash_keeps_voice_turns_on_minimal_thinking(setup):
+    house, *_ = setup
+    house.settings.update({"brain.thinking": "low", "gemini.model": "gemini-3.8-flash"})
+    assert house.brain._thinking().thinking_level.name == "MINIMAL"
+    house.settings.update({"brain.thinking": "high"})
+    assert house.brain._thinking().thinking_level.name == "HIGH"
+
+
 def test_plain_light_command_switches_without_gemini(setup):
     house, area, dimmer, gate, sent = setup
     house.brain._genai = lambda: (_ for _ in ()).throw(AssertionError("Gemini must not be asked"))

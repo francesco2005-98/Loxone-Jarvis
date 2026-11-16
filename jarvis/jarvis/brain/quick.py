@@ -32,10 +32,10 @@ _COMMAND_VERBS = ("schalte", "mach", "fahr", "dimm", "stell")
 _PREP = r"(?P<prep>im|in der|in dem|in|auf der|auf dem|am|beim)"
 _ROOM = r"(?P<room>[a-zäöüß][a-zäöüß0-9\- ]{1,40}?)"
 # Recognition sometimes hears "macht" or "schaltet" for the spoken imperative.
-_VERB = r"(?:(?:schalte|schalt|schaltet|mach|mache|macht)(?: mal)? )?(?:bitte )?"
-_MOVE = r"(?:(?:fahr|fahre|fahrt|mach|mache|macht)(?: mal)? )?(?:bitte )?"
-_DIMV = r"(?:(?:dimm|dimme|dimmt|mach|mache|macht|stell|stelle|stellt|schalte|schaltet)(?: mal)? )?(?:bitte )?"
-_STATE = r"(?P<state>an|ein|aus|anschalten|einschalten|ausschalten|anmachen|ausmachen)"
+_VERB = r"(?:mal )?(?:(?:schalte|schalt|schaltet|mach|mache|macht)(?: mal)? )?(?:bitte )?(?:mal )?"
+_MOVE = r"(?:mal )?(?:(?:fahr|fahre|fahrt|mach|mache|macht)(?: mal)? )?(?:bitte )?(?:mal )?"
+_DIMV = r"(?:mal )?(?:(?:dimm|dimme|dimmt|mach|mache|macht|stell|stelle|stellt|schalte|schaltet)(?: mal)? )?(?:bitte )?(?:mal )?"
+_STATE = r"(?P<state>anschalten|einschalten|ausschalten|anmachen|ausmachen|an|ein|aus|hell|dunkel)"
 _SHADE_STATE = r"(?P<state>hoch|rauf|ganz auf|ganz zu|auf|öffnen|runter|herunter|zu|schließen)(?: fahren)?"
 # Digits from Whisper, words ("dreißig Prozent") from Kroko.
 _VALUE = r"(?P<value>\d{1,3}|[a-zäöüß]+) ?(?:prozent|%)?"
@@ -50,13 +50,22 @@ _REASON = r"(?: (?P<reason>(?:da|dann|weil|denn|wegen|damit|für|bis|zum|zur|das
 _REASON_WORDS = {"da", "dann", "weil", "denn", "wegen", "damit", "für", "bis"}
 
 PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("light", re.compile(rf"^{_VERB}(?P<all>alle |sämtliche )(?P<lightword>{_LIGHT})(?: {_PREP} {_ROOM})? (?:bitte )?{_STATE}{_END}$")),
+    ("light", re.compile(rf"^{_VERB}(?P<lightword>{_LIGHT}) (?P<everywhere>überall|im ganzen haus) (?:bitte )?{_STATE}{_END}$")),
+    ("light", re.compile(rf"^(?:mach|mache|macht)(?: es)? (?P<state>hell|dunkel)(?: {_PREP} {_ROOM})?{_END}$")),
     ("light", re.compile(rf"^{_VERB}(?P<lightword>{_LIGHT})(?: {_PREP} {_ROOM})?{_SPOT} (?:bitte )?{_STATE}{_END}$")),
     ("light", re.compile(rf"^{_VERB}{_PREP} {_ROOM} {_LIGHT} {_STATE}{_END}$")),
     ("kind", re.compile(rf"^{_VERB}{_KIND}(?: {_PREP} {_ROOM})?{_SPOT} (?:bitte )?{_STATE}{_END}$")),
     ("kind", re.compile(rf"^{_VERB}{_PREP} {_ROOM} {_KIND} {_STATE}{_END}$")),
     ("mood", re.compile(rf"^(?:(?:aktiviere|starte|wähle|mach|mache|schalte)(?: mal)? )?(?:bitte )?(?:die )?(?:stimmung|lichtstimmung|szene) {_MOOD}(?: {_PREP} {_ROOM})?(?: an| ein| aktivieren)?{_END}$")),
+    ("rel", re.compile(rf"^{_DIMV}{_LIGHT}(?: {_PREP} {_ROOM})? (?P<degree>deutlich |viel |etwas |ein bisschen |ein wenig |noch |ein stück )?(?P<rel>heller|dunkler|hoch|rauf|runter){_END}$")),
+    ("rel", re.compile(rf"^(?:mach|mache|macht)(?: es)? (?P<degree>deutlich |viel |etwas |ein bisschen |ein wenig |noch |ein stück )?(?P<rel>heller|dunkler)(?: {_PREP} {_ROOM})?{_END}$")),
     ("dim", re.compile(rf"^{_DIMV}{_LIGHT}(?: {_PREP} {_ROOM})? auf {_VALUE}{_END}$")),
     ("dim", re.compile(rf"^{_DIMV}{_PREP} {_ROOM} {_LIGHT} auf {_VALUE}{_END}$")),
+    ("shade_pos", re.compile(rf"^{_MOVE}{_SHADE}(?: {_PREP} {_ROOM})? auf {_VALUE}{_END}$")),
+    ("shade_pos", re.compile(rf"^{_MOVE}{_SHADE}(?: {_PREP} {_ROOM})? halb (?:zu|runter|auf|hoch|offen){_END}$")),
+    ("shade_stop", re.compile(rf"^(?:halt|halte|stoppe|stopp|stop)(?: mal)? (?:bitte )?{_SHADE}(?: {_PREP} {_ROOM})?{_END}$")),
+    ("shade_stop", re.compile(rf"^{_MOVE}{_SHADE}(?: {_PREP} {_ROOM})? (?:anhalten|stopp|stop|halt){_END}$")),
     ("shade", re.compile(rf"^{_MOVE}{_SHADE}(?: {_PREP} {_ROOM})? (?:bitte )?{_SHADE_STATE}{_END}$")),
     ("shade", re.compile(rf"^{_MOVE}{_PREP} {_ROOM} {_SHADE} {_SHADE_STATE}{_END}$")),
     ("light", re.compile(r"^(?:please )?turn (?P<state>on|off) (?:the )?lights?(?: in (?:the )?(?P<room>[a-z][a-z\- ]{1,40}?))?(?: please)?$")),
@@ -79,7 +88,7 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 _WAKE = re.compile(rf"^(?:(?:hey|hallo|ok|okay) )?{WAKE_WORD}\b ?")
-_ON = {"an", "ein", "anschalten", "einschalten", "anmachen", "on"}
+_ON = {"an", "ein", "anschalten", "einschalten", "anmachen", "hell", "on"}
 _UP = {"hoch", "rauf", "auf", "ganz auf", "öffnen"}
 _DEVICE_KINDS = {"light": "light", "dim": "light", "shade": "shading", "kind": "light", "named": "light", "mood": "light"}
 _STOP = {"das", "die", "den", "der", "dem", "im", "in", "am", "an", "beim", "bei", "über", "neben", "hinter", "mal", "bitte"}
@@ -101,6 +110,7 @@ class QuickCommand:
     scene: str | None = None
     reason: str | None = None
     clock: str | None = None
+    scope: str | None = None  # all = every light in the room, house = every light
 
 
 def _norm(text: str) -> str:
@@ -110,6 +120,16 @@ def _norm(text: str) -> str:
 
 def parse(text: str) -> QuickCommand | None:
     sentence = _WAKE.sub("", _norm(text)).strip()
+    sentence = re.sub(r"^(?:kannst du |könntest du |würdest du |magst du )", "", sentence)
+    sentence = re.sub(r"^(?:lass|lasse) ", "mach ", sentence)
+    sentence = re.sub(r"\b(?:hier|doch|eben|schnell|kurz)\b", " ", sentence)
+    sentence = re.sub(r"\b(an|aus|ein) (machen|schalten)\b", r"\1\2", sentence)
+    sentence = sentence.replace("auf die hälfte", "auf 50 prozent").replace("auf die haelfte", "auf 50 prozent")
+    sentence = sentence.replace("auf halb", "auf 50 prozent")
+    sentence = re.sub(r"\s+", " ", sentence).strip()
+    # Two actions in one sentence stay with Gemini. Timers may say "eine Stunde und 30 Minuten".
+    if " und " in sentence and not re.search(r"\b(?:timer|wecker|erinner)", sentence):
+        return None
     found = _parse_sentence(sentence)
     if found is None:
         first, _, rest = sentence.partition(" ")
@@ -138,6 +158,24 @@ def _parse_sentence(sentence: str) -> QuickCommand | None:
             return QuickCommand(kind, None, None, kind, value=seconds, reason=reason)
         if kind == "temp":
             return QuickCommand("temp", room, groups.get("prep"), "temp", device="outside" if groups.get("outside") else None)
+        if kind == "rel":
+            degree = (groups.get("degree") or "").strip()
+            delta = 25 if degree in {"deutlich", "viel"} else 12
+            if groups["rel"] in {"dunkler", "runter"}:
+                delta = -delta
+            return QuickCommand("rel", room, groups.get("prep"), "dim", delta)
+        if kind == "shade_stop":
+            return QuickCommand("stop", room, groups.get("prep"), "shade")
+        if kind == "shade_pos":
+            raw = groups.get("value")
+            if raw:
+                number = word_number(raw)
+                if number is None or number != int(number) or not 0 <= int(number) <= 100:
+                    return None
+                value = int(number)
+            else:
+                value = 50
+            return QuickCommand("position", room, groups.get("prep"), "shade", value)
         if kind == "dim":
             number = word_number(groups["value"])
             if number is None or number != int(number):
@@ -162,7 +200,8 @@ def _parse_sentence(sentence: str) -> QuickCommand | None:
         if kind == "named":
             device = " ".join(filter(None, [groups["device"], groups.get("spot")]))
             return QuickCommand(action, room, groups.get("prep"), "named", device=device)
-        return QuickCommand("on" if groups["state"] in _ON else "off", room, groups.get("prep"), "light")
+        scope = "house" if groups.get("everywhere") else ("all" if (groups.get("all") or "").strip() else None)
+        return QuickCommand("on" if groups["state"] in _ON else "off", room, groups.get("prep"), "light", scope=scope)
     return None
 
 
@@ -246,7 +285,25 @@ def targets(house: "House", area: "Area", command: QuickCommand) -> tuple[list["
         for e in house.catalog.entries(only_allowed=True)
         if e.group == group and not e.critical and action in ACTIONS.get(e.type, ())
     ]
+    if command.scope == "house" and group == "light":
+        chosen = [e for e in candidates if e.type == "LightControllerV2"] or candidates
+        return (chosen, None) if chosen else ([], None)
+    if command.scope == "all" and group == "light":
+        pool, room_label, resolved = _in_room(house, area, command, candidates)
+        if command.room is None and not pool:
+            pool = [e for e in candidates if e.room in area.rooms]
+        chosen = [e for e in pool if e.type == "LightControllerV2"] or pool
+        return (chosen, room_label) if resolved and chosen else ([], None)
     if command.kind == "named":
+        if group == "light" and command.action in ("on", "off"):
+            candidates = candidates + [
+                e
+                for e in house.catalog.entries(only_allowed=True)
+                if e.group == "other"
+                and e.type in ("Switch", "TimedSwitch", "Pushbutton")
+                and not e.critical
+                and command.action in ACTIONS.get(e.type, ())
+            ]
         query = _tokens(command.device or "")
         if not any(t not in _WEAK for t in query):
             return [], None
@@ -307,6 +364,24 @@ def targets(house: "House", area: "Area", command: QuickCommand) -> tuple[list["
     if command.room is None and len(chosen) > 1 and not controllers:
         return [], None
     return chosen, room_label
+
+
+def brightness(house: "House", entry: "Entry") -> int | None:
+    """Current level in percent, if this device has one. None lets the sentence go to Gemini."""
+    state = house.miniserver.state
+    raw = None
+    if entry.type in ("Dimmer", "EIBDimmer"):
+        raw = state(entry.uuid, "position")
+    elif entry.type == "LightControllerV2":
+        master = house.miniserver.structure.child(entry.uuid, "/masterValue")
+        raw = state(master.uuid, "position") if master is not None else None
+    try:
+        number = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if 0.0 <= number <= 1.0:
+        number *= 100.0
+    return max(0, min(100, int(round(number))))
 
 
 def original_words(original: str, reason: str | None) -> str:
@@ -410,6 +485,8 @@ INTENT = {
     ("dim", "dim"): "dim",
     ("shade", "up"): "shade_up",
     ("shade", "down"): "shade_down",
+    ("shade", "stop"): "shade_stop",
+    ("shade", "position"): "shade_set",
 }
 
 

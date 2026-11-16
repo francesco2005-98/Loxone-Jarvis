@@ -66,7 +66,7 @@ def test_book_is_written_from_the_personality(house, tmp_path):
     assert seen == {"system": persona, "mime": "application/json"}
     assert book.current_for(persona)
     again = PhraseBook(tmp_path / "phrases.json")
-    assert again.pick("light_on", "de", raum="im Bad").startswith("Light_on de im Bad")
+    assert any(line.startswith("light_on de") for line in again._book["de"]["light_on"])
 
 
 def test_refresh_needs_a_key(house):

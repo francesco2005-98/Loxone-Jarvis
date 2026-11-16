@@ -188,6 +188,19 @@ def test_kroko_wording_is_understood():
     assert quick.parse("Fahrdi Rollos im Wohnzimmer runter").action == "down"
     assert quick.parse("die Rolllos im Wohnzimmer runter").action == "down"
     assert quick.parse("Ja, wis macht das Licht im Esszimmer an").room == "esszimmer"
+    assert quick.parse("Kannst du hier mal das Licht anmachen").action == "on"
+    assert quick.parse("Würdest du bitte das Licht im Bad ausschalten").action == "off"
+    assert quick.parse("Mach es dunkel").action == "off"
+    assert quick.parse("Alle Lichter aus").scope == "all"
+    assert quick.parse("Licht überall an").scope == "house"
+    assert quick.parse("Dimm das Licht auf die Hälfte").value == 50
+    assert quick.parse("Mach das Licht etwas dunkler").action == "rel" and quick.parse("Mach das Licht etwas dunkler").value == -12
+    assert quick.parse("Mach das Licht deutlich heller").value == 25
+    assert quick.parse("Halt die Rollos im Wohnzimmer").action == "stop"
+    assert quick.parse("Fahr die Rollos auf 40 Prozent").action == "position" and quick.parse("Fahr die Rollos auf 40 Prozent").value == 40
+    assert quick.parse("Rollos halb zu").value == 50
+    assert quick.parse("Mach das Licht im Esszimmer gemütlich") is None
+    assert quick.parse("Mach die Steckdose an").kind == "named"
 
 
 def test_rgb_scene_state_is_shown(home):

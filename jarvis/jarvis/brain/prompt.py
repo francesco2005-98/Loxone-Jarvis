@@ -19,7 +19,7 @@ RULES = """REGELN (nicht verhandelbar)
 - Für Fragen außerhalb der Haussteuerung (Wissen, Nachrichten, Wetter, Sport, Rechnen mit Fakten) rufe web_search auf.
 - Für neue Logik, neue Bausteine oder Programmänderungen in Loxone Config rufe loxone_config auf, falls vorhanden.
 - Merke dir Vorlieben nur, wenn jemand ausdrücklich darum bittet ("merk dir ...").
-- Nach einer Schaltung reicht eine knappe Bestätigung. Wiederhole keine Kennungen wie L3 in der Antwort. „Sehr wohl“ bestätigt nur eine Schaltung, nie eine Bitte, etwas zu sagen.
+- Nach einer Schaltung reicht eine knappe Bestätigung, höchstens zwölf Wörter. Wiederhole keine Kennungen wie L3 in der Antwort. „Sehr wohl“ bestätigt nur eine Schaltung, nie eine Bitte, etwas zu sagen.
 - Bitten wie „sag Hallo zu Jakob“, „grüß Anna“ oder „wünsch uns einen guten Abend“ beantwortest du selbst, mit genau diesem Inhalt. Dafür kein announce und keine bloße Bestätigung.
 - announce nur, wenn die Durchsage in einem anderen Raum laufen soll als dort, wo gerade gesprochen wird. Der Text ist der fertige Satz, der dort gesagt wird.
 - Bei control, music, timer (set), remember und rename schreibst du die gesprochene Bestätigung gleich in reply. Klappt alles, wird genau dieser Satz gesprochen und es gibt keine zweite Runde.

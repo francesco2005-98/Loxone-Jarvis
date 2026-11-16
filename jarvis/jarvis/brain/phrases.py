@@ -26,13 +26,14 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 INTENTS = (
-    "light_on", "light_off", "dim", "scene", "shade_up", "shade_down", "time", "date", "temperature", "failed", "offline",
+    "light_on", "light_off", "dim", "scene", "shade_up", "shade_down", "shade_stop", "shade_set",
+    "time", "date", "temperature", "failed", "offline",
     "offer_done", "offer_declined",
     "timer_set", "reminder_set", "timer_left", "timer_none", "timer_cancel", "timer_due", "timer_due_plain", "reminder_due",
 )
 REQUIRED = {
-    "light_on": "{raum}", "light_off": "{raum}", "shade_up": "{raum}", "shade_down": "{raum}",
-    "dim": "{wert}", "scene": "{wert}", "temperature": "{wert}", "time": "{uhrzeit}", "date": "{datum}",
+    "light_on": "{raum}", "light_off": "{raum}", "shade_up": "{raum}", "shade_down": "{raum}", "shade_stop": "{raum}",
+    "dim": "{wert}", "scene": "{wert}", "shade_set": "{wert}", "temperature": "{wert}", "time": "{uhrzeit}", "date": "{datum}",
     "timer_set": "{wert}", "reminder_set": "{wert}", "timer_left": "{wert}", "timer_due": "{wert}", "reminder_due": "{wert}",
 }
 PLACEHOLDERS = ("{raum}", "{, anrede}", "{wert}", "{uhrzeit}", "{datum}")
@@ -45,17 +46,28 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
             "Licht {raum} ist an{, anrede}.",
             "Erledigt{, anrede}. Es werde Licht {raum}.",
             "Wie gewünscht{, anrede}, das Licht {raum} brennt.",
+            "Selbstverständlich{, anrede}. Helligkeit {raum}.",
+            "Ist gemacht{, anrede}. Das Licht {raum} ist an.",
+            "Einen Moment{, anrede}. Licht {raum} kommt.",
+            "Natürlich{, anrede}. Es ist hell {raum}.",
         ],
         "light_off": [
             "Sehr wohl{, anrede}. Licht {raum} ist aus.",
             "Licht {raum} ist aus{, anrede}.",
             "Erledigt{, anrede}. Es ist jetzt dunkel {raum}.",
             "Wie gewünscht{, anrede}, das Licht {raum} ist gelöscht.",
+            "Selbstverständlich{, anrede}. Dunkel {raum}.",
+            "Ist gemacht{, anrede}. Das Licht {raum} ist aus.",
+            "Wie Sie wünschen{, anrede}. Licht aus {raum}.",
+            "Natürlich{, anrede}. Es ist dunkel {raum}.",
         ],
         "dim": [
             "Licht {raum} auf {wert} Prozent{, anrede}.",
             "Sehr wohl{, anrede}. {wert} Prozent {raum}.",
             "Gedimmt auf {wert} Prozent {raum}{, anrede}.",
+            "Helligkeit {raum}: {wert} Prozent{, anrede}.",
+            "Selbstverständlich{, anrede}. {wert} Prozent {raum}.",
+            "Ist eingestellt{, anrede}. {wert} Prozent {raum}.",
         ],
         "scene": [
             "Stimmung {wert} {raum}{, anrede}.",
@@ -66,11 +78,27 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
             "Die Rollos {raum} fahren hoch{, anrede}.",
             "Sehr wohl{, anrede}. Rollos {raum} öffnen sich.",
             "Etwas Tageslicht {raum}, kommt sofort{, anrede}.",
+            "Selbstverständlich{, anrede}. Rollos {raum} gehen auf.",
+            "Ist veranlasst{, anrede}. Die Rollos {raum} öffnen sich.",
+            "Wie gewünscht{, anrede}, mehr Licht {raum}.",
         ],
         "shade_down": [
             "Die Rollos {raum} fahren runter{, anrede}.",
             "Sehr wohl{, anrede}. Rollos {raum} schließen sich.",
             "Rollos {raum} gehen zu{, anrede}.",
+            "Selbstverständlich{, anrede}. Die Rollos {raum} fahren zu.",
+            "Ist veranlasst{, anrede}. Schatten {raum}.",
+            "Wie gewünscht{, anrede}, die Rollos {raum} schließen sich.",
+        ],
+        "shade_stop": [
+            "Die Rollos {raum} halten an{, anrede}.",
+            "Sehr wohl{, anrede}. Rollos {raum} gestoppt.",
+            "Angehalten {raum}{, anrede}.",
+        ],
+        "shade_set": [
+            "Rollos {raum} auf {wert} Prozent{, anrede}.",
+            "Sehr wohl{, anrede}. {wert} Prozent {raum}.",
+            "Position {wert} Prozent {raum}{, anrede}.",
         ],
         "time": [
             "Es ist {uhrzeit}{, anrede}.",
@@ -143,8 +171,10 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
         "light_on": ["Very good{, anrede}. Lights {raum} are on.", "Lights {raum} on{, anrede}.", "Done{, anrede}. Let there be light {raum}."],
         "light_off": ["Very good{, anrede}. Lights {raum} are off.", "Lights {raum} off{, anrede}.", "Done{, anrede}. Lights out {raum}."],
         "dim": ["Lights {raum} at {wert} percent{, anrede}.", "Dimmed to {wert} percent {raum}{, anrede}."],
-        "shade_up": ["Raising the blinds {raum}{, anrede}.", "Blinds {raum} going up{, anrede}."],
-        "shade_down": ["Lowering the blinds {raum}{, anrede}.", "Blinds {raum} going down{, anrede}."],
+        "shade_up": ["Raising the blinds {raum}{, anrede}.", "Blinds {raum} going up{, anrede}.", "Very good{, anrede}. Opening the blinds {raum}."],
+        "shade_down": ["Lowering the blinds {raum}{, anrede}.", "Blinds {raum} going down{, anrede}.", "Very good{, anrede}. Closing the blinds {raum}."],
+        "shade_stop": ["Stopping the blinds {raum}{, anrede}.", "Blinds {raum} stopped{, anrede}."],
+        "shade_set": ["Blinds {raum} at {wert} percent{, anrede}.", "Very good{, anrede}. {wert} percent {raum}."],
         "time": ["It is {uhrzeit}{, anrede}.", "The time is {uhrzeit}{, anrede}."],
         "date": ["Today is {datum}{, anrede}.", "It is {datum}{, anrede}."],
         "temperature": ["It is {wert} {raum}{, anrede}.", "Currently {wert} {raum}{, anrede}."],
@@ -165,13 +195,14 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
 }
 
 GENERATE = """Formuliere Bestätigungssätze für einen Sprachassistenten, genau in deinem Stil und deiner Persönlichkeit.
-Jede Situation bekommt 6 abwechslungsreiche, kurze Sätze (höchstens 12 Wörter), die gesprochen werden.
+Jede Situation bekommt 8 abwechslungsreiche, kurze Sätze (höchstens 12 Wörter), die gesprochen werden.
 Platzhalter exakt so übernehmen:
 - {raum}: Ortsangabe wie "im Esszimmer" oder leer. Muss in light_on, light_off, shade_up, shade_down vorkommen.
 - {, anrede}: wird zu ", Sir" oder entfällt. Nur dort, wo eine Anrede mit Komma natürlich klingt.
 - {wert}: Prozentzahl in dim, Name der Stimmung in scene, Temperatur in temperature; dort Pflicht. {uhrzeit}: Uhrzeit, Pflicht in time. {datum}: Datum, Pflicht in date.
 Situationen: light_on (Licht an), light_off (Licht aus), dim (Licht gedimmt), scene (Lichtstimmung {wert} aktiv),
-shade_up (Rollos hoch), shade_down (Rollos runter), time (Uhrzeit nennen), date (Datum nennen),
+shade_up (Rollos hoch), shade_down (Rollos runter), shade_stop (Rollos angehalten, {raum} Pflicht),
+shade_set (Rollos auf {wert} Prozent, {wert} und {raum} Pflicht), time (Uhrzeit nennen), date (Datum nennen),
 temperature (Temperatur {wert} nennen, {raum} wie "im Bad" oder "draußen"),
 failed (Aktion fehlgeschlagen), offline (KI nicht erreichbar, Licht und Rollos funktionieren weiter),
 offer_done (dein eigener Vorschlag wurde nach einem Ja ausgeführt, sehr kurz),
@@ -246,7 +277,10 @@ class PhraseBook:
         return hashlib.sha256(persona.strip().encode("utf-8")).hexdigest()[:16]
 
     def pick(self, intent: str, lang: str, **values: Any) -> str:
-        variants = self._book.get("en" if lang == "en" else "de", {}).get(intent) or DEFAULT["de"][intent]
+        lang_key = "en" if lang == "en" else "de"
+        active = self._book.get(lang_key, {}).get(intent) or []
+        base = DEFAULT.get(lang_key, DEFAULT["de"]).get(intent) or DEFAULT["de"][intent]
+        variants = list(dict.fromkeys([*active, *base])) or base
         key = (lang, intent)
         choices = [v for v in variants if v != self._last.get(key)] or variants
         template = random.choice(choices)

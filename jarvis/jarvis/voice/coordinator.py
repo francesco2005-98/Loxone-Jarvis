@@ -787,13 +787,26 @@ class Coordinator:
         if not entries:
             return None
         value = command.scene or (str(command.value) if command.value is not None else None)
+        action = command.action
+        levels: list[int] = []
+        if action == "rel":
+            current = [quick.brightness(self.house, entry) for entry in entries]
+            if any(level is None for level in current):
+                return None
+            levels = [max(0, min(100, int(level + (command.value or 0)))) for level in current if level is not None]
+            command.action = "dim"
+            command.value = levels[0]
+            value = str(levels[0])
         confirmation = quick.reply(command, room, turn.lang, anrede, True, book)
         # The voice is synthesized while the Miniserver switches.
         self.house.piper.prerender(confirmation, turn.lang)
         ok = True
-        for entry in entries:
+        for index, entry in enumerate(entries):
             try:
-                result = await self.house.brain.runner.execute(entry, command.action, value, None, turn)
+                one = value
+                if action == "rel":
+                    one = str(levels[index])
+                result = await self.house.brain.runner.execute(entry, command.action, one, None, turn)
                 ok = ok and bool(result.get("ok"))
             except Exception:  # noqa: BLE001
                 log.exception("quick command failed")

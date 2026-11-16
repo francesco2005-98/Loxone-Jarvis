@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 MAX_STEPS = 6
-HISTORY_ITEMS = 12
+HISTORY_ITEMS = 6
 # A web search that is still running after this long gets one short spoken line first.
 HOLD_AFTER = 1.0
 # See the [Nachfrage] and [Ausführlich] rules in prompt.RULES.
@@ -125,6 +125,9 @@ class Brain:
         wanted = self.house.settings.get("brain.thinking")
         if wanted == "auto":
             wanted = "minimal" if flash else "low"
+        elif flash and wanted == "low":
+            # "low" still spends most of a second thinking. Voice turns stay on minimal.
+            wanted = "minimal"
         if not flash:
             # Pro models know only low and high.
             wanted = "high" if wanted == "high" else "low"
@@ -149,7 +152,7 @@ class Brain:
             tools=tools or None,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             thinking_config=self._thinking(),
-            max_output_tokens=2048 if long else 1024,
+            max_output_tokens=2048 if long else 220,
         )
 
     async def generate(self, contents: list, config) -> Any:
