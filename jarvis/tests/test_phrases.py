@@ -38,10 +38,16 @@ def test_validate_drops_broken_variants_and_falls_back():
 
 def test_pick_varies_and_never_repeats_twice(tmp_path):
     book = PhraseBook(tmp_path / "phrases.json")
-    seen = [book.pick("light_on", "de", raum="im Esszimmer", anrede="Sir") for _ in range(12)]
-    assert all("Esszimmer" in s for s in seen)
+    seen = [book.pick("light_on", "de", raum="im Esszimmer", anrede="Sir") for _ in range(16)]
+    assert all("Esszimmer" in s and "Sir" in s for s in seen)
     assert all(a != b for a, b in zip(seen, seen[1:]))
-    assert len(set(seen)) > 1
+    assert len(set(seen)) >= 12
+    classic = "licht im esszimmer ist an"
+    assert sum(classic in s.lower() for s in set(seen)) <= 2
+    assert all("{raum}" in line and "{, anrede}" in line for line in DEFAULT["de"]["light_on"])
+    for intent, token in (("light_on", "{raum}"), ("light_off", "{raum}"), ("dim", "{wert}"), ("state", "{wert}"), ("climate", "{wert}"), ("time", "{uhrzeit}"), ("date", "{datum}")):
+        for lang in ("de", "en"):
+            assert all(token in line for line in DEFAULT[lang][intent]), (lang, intent)
 
 
 def test_book_is_written_from_the_personality(house, tmp_path):

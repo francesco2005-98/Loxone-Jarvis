@@ -46,23 +46,39 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
     "de": {
         "light_on": [
             "Sehr wohl{, anrede}. Licht {raum} ist an.",
-            "Licht {raum} ist an{, anrede}.",
             "Erledigt{, anrede}. Es werde Licht {raum}.",
             "Wie gewünscht{, anrede}, das Licht {raum} brennt.",
             "Selbstverständlich{, anrede}. Helligkeit {raum}.",
-            "Ist gemacht{, anrede}. Das Licht {raum} ist an.",
-            "Einen Moment{, anrede}. Licht {raum} kommt.",
+            "Ist gemacht{, anrede}. Ich habe das Licht {raum} eingeschaltet.",
+            "Einen Moment{, anrede}. Das Licht {raum} kommt.",
             "Natürlich{, anrede}. Es ist hell {raum}.",
+            "Zu Befehl{, anrede}. Die Beleuchtung {raum} leuchtet.",
+            "Geht klar{, anrede}. Die Lampen {raum} sind an.",
+            "Aber gern{, anrede}. Ich sorge für Helligkeit {raum}.",
+            "Schon geschehen{, anrede}, es brennt {raum}.",
+            "Wie Sie wünschen{, anrede}. Das Licht {raum} habe ich angemacht.",
+            "Sofort{, anrede}. Die Beleuchtung {raum} ist eingeschaltet.",
+            "Mache ich{, anrede}. Das Licht {raum} geht an.",
+            "Notiert{, anrede}. Es leuchtet {raum}.",
+            "Kommt sofort{, anrede}. Ich schalte das Licht {raum} ein.",
         ],
         "light_off": [
             "Sehr wohl{, anrede}. Licht {raum} ist aus.",
-            "Licht {raum} ist aus{, anrede}.",
             "Erledigt{, anrede}. Es ist jetzt dunkel {raum}.",
             "Wie gewünscht{, anrede}, das Licht {raum} ist gelöscht.",
-            "Selbstverständlich{, anrede}. Dunkel {raum}.",
-            "Ist gemacht{, anrede}. Das Licht {raum} ist aus.",
-            "Wie Sie wünschen{, anrede}. Licht aus {raum}.",
+            "Selbstverständlich{, anrede}. Es wird dunkel {raum}.",
+            "Ist gemacht{, anrede}. Ich habe das Licht {raum} ausgeschaltet.",
+            "Wie Sie wünschen{, anrede}. Das Licht {raum} bleibt aus.",
             "Natürlich{, anrede}. Es ist dunkel {raum}.",
+            "Zu Befehl{, anrede}. Die Beleuchtung {raum} ist aus.",
+            "Geht klar{, anrede}. Die Lampen {raum} sind aus.",
+            "Schon geschehen{, anrede}, und es ist dunkel {raum}.",
+            "Sofort{, anrede}. Ich lösche das Licht {raum}.",
+            "Mache ich{, anrede}. Das Licht {raum} geht aus.",
+            "Notiert{, anrede}. Das Licht {raum} ist ausgeschaltet.",
+            "Aber gern{, anrede}. Ich mache es dunkel {raum}.",
+            "Einen Moment{, anrede}. Das Licht {raum} erlischt.",
+            "Kommt sofort{, anrede}. Ich schalte das Licht {raum} aus.",
         ],
         "dim": [
             "Licht {raum} auf {wert} Prozent{, anrede}.",
@@ -71,11 +87,22 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
             "Helligkeit {raum}: {wert} Prozent{, anrede}.",
             "Selbstverständlich{, anrede}. {wert} Prozent {raum}.",
             "Ist eingestellt{, anrede}. {wert} Prozent {raum}.",
+            "Wie gewünscht{, anrede}, das Licht {raum} steht auf {wert} Prozent.",
+            "Ich dimme auf {wert} Prozent {raum}{, anrede}.",
+            "Helligkeit angepasst{, anrede}: {wert} Prozent {raum}.",
+            "So sei es{, anrede}. {wert} Prozent {raum}.",
+            "Gemacht{, anrede}. Das Licht {raum} auf {wert} Prozent.",
+            "Notiert{, anrede}. {wert} Prozent Helligkeit {raum}.",
         ],
         "scene": [
             "Stimmung {wert} {raum}{, anrede}.",
             "Sehr wohl{, anrede}. {wert} {raum} ist aktiv.",
             "Wie gewünscht{, anrede}, Stimmung {wert}.",
+            "Ich lege {wert} {raum} auf{, anrede}.",
+            "Atmosphäre {wert}{, anrede}.",
+            "Szene {wert} läuft {raum}{, anrede}.",
+            "Gemacht{, anrede}. {wert} {raum}.",
+            "Selbstverständlich{, anrede}. {wert} ist gewählt.",
         ],
         "shade_up": [
             "Die Rollos {raum} fahren hoch{, anrede}.",
@@ -84,6 +111,12 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
             "Selbstverständlich{, anrede}. Rollos {raum} gehen auf.",
             "Ist veranlasst{, anrede}. Die Rollos {raum} öffnen sich.",
             "Wie gewünscht{, anrede}, mehr Licht {raum}.",
+            "Ich fahre die Rollos {raum} hoch{, anrede}.",
+            "Geht klar{, anrede}. Beschattung {raum} öffnet sich.",
+            "Schon unterwegs{, anrede}. Die Rollos {raum} gehen auf.",
+            "Zu Befehl{, anrede}. Hoch mit den Rollos {raum}.",
+            "Tageslicht kommt {raum}{, anrede}.",
+            "Mache ich{, anrede}. Die Rollos {raum} geben den Blick frei.",
         ],
         "shade_down": [
             "Die Rollos {raum} fahren runter{, anrede}.",
@@ -92,30 +125,60 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
             "Selbstverständlich{, anrede}. Die Rollos {raum} fahren zu.",
             "Ist veranlasst{, anrede}. Schatten {raum}.",
             "Wie gewünscht{, anrede}, die Rollos {raum} schließen sich.",
+            "Ich lasse die Rollos {raum} herunter{, anrede}.",
+            "Geht klar{, anrede}. Beschattung {raum} fährt zu.",
+            "Schon unterwegs{, anrede}. Die Rollos {raum} gehen runter.",
+            "Zu Befehl{, anrede}. Zu mit den Rollos {raum}.",
+            "Schatten kommt {raum}{, anrede}.",
+            "Mache ich{, anrede}. Die Rollos {raum} schließen.",
         ],
         "shade_stop": [
             "Die Rollos {raum} halten an{, anrede}.",
             "Sehr wohl{, anrede}. Rollos {raum} gestoppt.",
             "Angehalten {raum}{, anrede}.",
+            "Stopp {raum}{, anrede}. Die Rollos bleiben, wo sie sind.",
+            "Ich halte die Rollos {raum} an{, anrede}.",
+            "Schon gestoppt {raum}{, anrede}.",
+            "Geht klar{, anrede}. Beschattung {raum} steht.",
+            "Zu Befehl{, anrede}. Die Rollos {raum} halten.",
         ],
         "shade_set": [
             "Rollos {raum} auf {wert} Prozent{, anrede}.",
             "Sehr wohl{, anrede}. {wert} Prozent {raum}.",
             "Position {wert} Prozent {raum}{, anrede}.",
+            "Ich fahre die Rollos {raum} auf {wert} Prozent{, anrede}.",
+            "Beschattung {raum}: {wert} Prozent{, anrede}.",
+            "Wie gewünscht{, anrede}, {wert} Prozent {raum}.",
+            "Gemacht{, anrede}. Rollos {raum} auf {wert} Prozent.",
+            "So sei es{, anrede}. {wert} Prozent {raum}.",
         ],
         "time": [
             "Es ist {uhrzeit}{, anrede}.",
             "Wir haben {uhrzeit}{, anrede}.",
             "Gerade ist es {uhrzeit}{, anrede}.",
+            "Die Uhr zeigt {uhrzeit}{, anrede}.",
+            "Nach meiner Uhr ist es {uhrzeit}{, anrede}.",
+            "Punkt {uhrzeit}{, anrede}.",
+            "Ich lese {uhrzeit}{, anrede}.",
+            "Aktuell ist es {uhrzeit}{, anrede}.",
         ],
         "date": [
             "Heute ist {datum}{, anrede}.",
             "Wir haben {datum}{, anrede}.",
+            "Heute schreiben wir den {datum}{, anrede}.",
+            "Der heutige Tag ist {datum}{, anrede}.",
+            "Laut Kalender ist {datum}{, anrede}.",
+            "Heute: {datum}{, anrede}.",
         ],
         "temperature": [
             "Es hat {wert} {raum}{, anrede}.",
             "Gerade sind es {wert} {raum}{, anrede}.",
             "Aktuell {wert} {raum}{, anrede}.",
+            "Ich messe {wert} {raum}{, anrede}.",
+            "Das Thermometer sagt {wert} {raum}{, anrede}.",
+            "Die Temperatur liegt bei {wert} {raum}{, anrede}.",
+            "Hier die Temperatur{, anrede}: {wert} {raum}.",
+            "Soweit ich sehe, {wert} {raum}{, anrede}.",
         ],
         "failed": [
             "Verzeihung{, anrede}, das hat nicht geklappt.",
@@ -171,42 +234,106 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
         ],
         "state": [
             "{wert}{, anrede}.",
-            "Gerade: {wert}{, anrede}.",
-            "Nach dem Stand: {wert}{, anrede}.",
+            "Gerade gilt{, anrede}: {wert}.",
+            "Ich sehe{, anrede}, {wert}.",
+            "Nach dem Stand{, anrede}: {wert}.",
+            "Kurz gesagt{, anrede}, {wert}.",
+            "So ist die Lage{, anrede}. {wert}.",
+            "Soweit ich das sehe{, anrede}, {wert}.",
+            "Das kann ich sagen{, anrede}: {wert}.",
+            "Aktuell{, anrede}: {wert}.",
+            "Hier die Auskunft{, anrede}. {wert}.",
+            "Moment{, anrede}. {wert}.",
+            "Wenn ich hinsehe{, anrede}: {wert}.",
         ],
         "window": [
             "Das Fenster {raum} geht {wert}{, anrede}.",
             "Sehr wohl{, anrede}. Fenster {raum} {wert}.",
             "Ist veranlasst{, anrede}. Fenster {raum} {wert}.",
+            "Ich fahre das Fenster {raum} {wert}{, anrede}.",
+            "Wie gewünscht{, anrede}, Fenster {raum} {wert}.",
+            "Geht klar{, anrede}. Das Fenster {raum}: {wert}.",
+            "Schon unterwegs{, anrede}. Fenster {raum} {wert}.",
+            "Zu Befehl{, anrede}. Fenster {raum} {wert}.",
         ],
         "slat": [
             "Lamellen {raum} auf {wert} Prozent{, anrede}.",
             "Sehr wohl{, anrede}. Lamellen {wert} Prozent {raum}.",
+            "Ich stelle die Lamellen {raum} auf {wert} Prozent{, anrede}.",
+            "Lamellenstellung {wert} Prozent {raum}{, anrede}.",
+            "Wie gewünscht{, anrede}, Lamellen {raum} auf {wert} Prozent.",
+            "Gemacht{, anrede}. {wert} Prozent an den Lamellen {raum}.",
         ],
         "climate": [
             "Die Heizung {raum} steht auf {wert}{, anrede}.",
             "Sehr wohl{, anrede}. {wert} {raum}.",
             "Ist eingestellt{, anrede}. Heizung {raum} auf {wert}.",
+            "Wie gewünscht{, anrede}, {wert} {raum}.",
+            "Der Regler {raum} steht auf {wert}{, anrede}.",
+            "Gemacht{, anrede}. {wert} für die Heizung {raum}.",
+            "Selbstverständlich{, anrede}. Heizung {raum}: {wert}.",
+            "Ich stelle die Heizung {raum} auf {wert}{, anrede}.",
+            "Temperaturwunsch notiert{, anrede}: {wert} {raum}.",
+            "So sei es{, anrede}. {wert} {raum}.",
+            "Geht klar{, anrede}. {wert} {raum}.",
+            "Zu Befehl{, anrede}. Der Raumregler {raum} steht auf {wert}.",
         ],
         "color": [
             "Das Licht {raum} wird {wert}{, anrede}.",
             "Sehr wohl{, anrede}. {wert} {raum}.",
             "Farbe {wert} {raum}{, anrede}.",
+            "Ich färbe das Licht {raum} {wert}{, anrede}.",
+            "Wie gewünscht{, anrede}, {wert} {raum}.",
+            "Farbton {wert}{, anrede}.",
+            "Gemacht{, anrede}. Das Licht {raum} in {wert}.",
+            "Selbstverständlich{, anrede}. {wert} {raum}.",
         ],
         "music": [
             "Sehr wohl{, anrede}. {wert}.",
-            "Musik {wert}{, anrede}.",
+            "Musik: {wert}{, anrede}.",
             "Ist veranlasst{, anrede}. {wert}.",
+            "Wie gewünscht{, anrede}, {wert}.",
+            "Selbstverständlich{, anrede}. {wert}.",
+            "Mache ich{, anrede}. {wert}.",
+            "Kommt sofort{, anrede}: {wert}.",
+            "Erledigt{, anrede}. {wert}.",
+            "Geht klar{, anrede}. {wert}.",
+            "Zu Befehl{, anrede}. {wert}.",
+            "Schon geschehen{, anrede}. {wert}.",
+            "Ich kümmere mich darum{, anrede}: {wert}.",
         ],
         "confirm_ask": [
             "Soll ich {wert}{, anrede}?",
             "Darf ich {wert}{, anrede}?",
             "Wirklich {wert}{, anrede}?",
+            "Möchten Sie, dass ich {wert}{, anrede}?",
+            "Wollen Sie, dass ich {wert}{, anrede}?",
+            "Ein Ja genügt{, anrede}, dann werde ich {wert}?",
+            "Soll das so sein{, anrede}: {wert}?",
+            "Ich würde {wert}{, anrede}. Einverstanden?",
         ],
     },
     "en": {
-        "light_on": ["Very good{, anrede}. Lights {raum} are on.", "Lights {raum} on{, anrede}.", "Done{, anrede}. Let there be light {raum}."],
-        "light_off": ["Very good{, anrede}. Lights {raum} are off.", "Lights {raum} off{, anrede}.", "Done{, anrede}. Lights out {raum}."],
+        "light_on": [
+            "Very good{, anrede}. Lights {raum} are on.",
+            "Lights {raum} on{, anrede}.",
+            "Done{, anrede}. Let there be light {raum}.",
+            "Certainly{, anrede}. The lights {raum} are lit.",
+            "As you wish{, anrede}. Switching the lights {raum} on.",
+            "Right away{, anrede}. Brightness {raum}.",
+            "Consider it done{, anrede}. Lights {raum} coming on.",
+            "Of course{, anrede}. It is bright {raum}.",
+        ],
+        "light_off": [
+            "Very good{, anrede}. Lights {raum} are off.",
+            "Lights {raum} off{, anrede}.",
+            "Done{, anrede}. Lights out {raum}.",
+            "Certainly{, anrede}. The lights {raum} are dark.",
+            "As you wish{, anrede}. Switching the lights {raum} off.",
+            "Right away{, anrede}. Darkness {raum}.",
+            "Consider it done{, anrede}. Lights {raum} going out.",
+            "Of course{, anrede}. It is dark {raum}.",
+        ],
         "dim": ["Lights {raum} at {wert} percent{, anrede}.", "Dimmed to {wert} percent {raum}{, anrede}."],
         "shade_up": ["Raising the blinds {raum}{, anrede}.", "Blinds {raum} going up{, anrede}.", "Very good{, anrede}. Opening the blinds {raum}."],
         "shade_down": ["Lowering the blinds {raum}{, anrede}.", "Blinds {raum} going down{, anrede}.", "Very good{, anrede}. Closing the blinds {raum}."],
@@ -228,7 +355,16 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
         "timer_due": ["Pardon me{, anrede}, time is up for {wert}.", "Your {wert} timer is done{, anrede}."],
         "timer_due_plain": ["Pardon me{, anrede}, your timer is done.", "Time is up{, anrede}."],
         "reminder_due": ["A reminder{, anrede}: {wert}.", "You wanted me to remind you{, anrede}: {wert}."],
-        "state": ["{wert}{, anrede}.", "Right now: {wert}{, anrede}."],
+        "state": [
+            "{wert}{, anrede}.",
+            "Right now: {wert}{, anrede}.",
+            "I see {wert}{, anrede}.",
+            "At the moment{, anrede}: {wert}.",
+            "As it stands{, anrede}, {wert}.",
+            "Here is the reading{, anrede}: {wert}.",
+            "Currently{, anrede}: {wert}.",
+            "From what I can tell{, anrede}, {wert}.",
+        ],
         "window": ["The window {raum} is going {wert}{, anrede}.", "Very good{, anrede}. Window {raum} {wert}."],
         "slat": ["Slats {raum} at {wert} percent{, anrede}.", "Very good{, anrede}. Slats at {wert} percent."],
         "climate": ["Heating {raum} set to {wert}{, anrede}.", "Very good{, anrede}. {wert} {raum}."],
@@ -239,7 +375,8 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
 }
 
 GENERATE = """Formuliere Bestätigungssätze für einen Sprachassistenten, genau in deinem Stil und deiner Persönlichkeit.
-Jede Situation bekommt 8 abwechslungsreiche, kurze Sätze (höchstens 12 Wörter), die gesprochen werden.
+Jede Situation bekommt 8 kurze Sätze (höchstens 12 Wörter), die gesprochen werden.
+Die 8 Sätze einer Situation müssen sich in der Satzform unterscheiden. Nicht denselben Kernsatz mit anderem Vorspann wiederholen, also nicht mehrfach „Das Licht ist an“ oder „Sehr wohl, das Licht ist an“.
 Platzhalter exakt so übernehmen:
 - {raum}: Ortsangabe wie "im Esszimmer" oder leer. Muss in light_on, light_off, shade_up, shade_down vorkommen.
 - {, anrede}: wird zu ", Sir" oder entfällt. Nur dort, wo eine Anrede mit Komma natürlich klingt.
@@ -308,7 +445,7 @@ class PhraseBook:
         self._book = DEFAULT
         self.persona_hash: str | None = None
         self.generated_at: float | None = None
-        self._last: dict[tuple[str, str], str] = {}
+        self._recent: dict[tuple[str, str], list[str]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -328,11 +465,13 @@ class PhraseBook:
         lang_key = "en" if lang == "en" else "de"
         active = self._book.get(lang_key, {}).get(intent) or []
         base = DEFAULT.get(lang_key, DEFAULT["de"]).get(intent) or DEFAULT["de"][intent]
-        variants = list(dict.fromkeys([*active, *base])) or base
-        key = (lang, intent)
-        choices = [v for v in variants if v != self._last.get(key)] or variants
+        variants = list(dict.fromkeys([*active, *base])) or list(base)
+        key = (lang_key, intent)
+        recent = self._recent.setdefault(key, [])
+        choices = [v for v in variants if v not in recent] or variants
         template = random.choice(choices)
-        self._last[key] = template
+        recent.append(template)
+        del recent[: max(0, len(recent) - max(1, len(variants) - 1))]
         return fill(template, **values)
 
     def examples(self, lang: str = "de") -> list[str]:

@@ -8,6 +8,7 @@ weather and open questions, still goes to Gemini.
 
 from __future__ import annotations
 
+import random
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -728,6 +729,20 @@ def temperature_reply(house: "House", area: "Area", command: QuickCommand, lang:
     return book.pick("temperature", lang, raum=label or "", anrede=anrede, wert=wert)
 
 
+def _reading(name: str, text: str) -> str:
+    """One device, said as a sentence fragment rather than a fixed 'Name: Wert'."""
+    shown = (text or "unbekannt").strip()
+    label = name.strip()
+    return random.choice((
+        f"{label} ist {shown}",
+        f"bei {label} steht {shown}",
+        f"{label} meldet {shown}",
+        f"am {label} lese ich {shown}",
+        f"für {label} gilt {shown}",
+        f"{label}: {shown}",
+    ))
+
+
 def status_reply(house: "House", area: "Area", command: QuickCommand, lang: str, anrede: str | None, book: "PhraseBook") -> str | None:
     """A reading from the Miniserver. None when the house has no such device."""
     catalog = house.catalog
@@ -743,7 +758,7 @@ def status_reply(house: "House", area: "Area", command: QuickCommand, lang: str,
 
     if topic == "power":
         meters = place([e for e in catalog.entries(only_allowed=True) if e.type == "Meter"])
-        parts = [f"{e.name}: {catalog.describe_state(e, state)}" for e in meters if catalog.describe_state(e, state)]
+        parts = [_reading(e.name, catalog.describe_state(e, state)) for e in meters if catalog.describe_state(e, state)]
         if not parts:
             return None
         wert = "; ".join(parts)
@@ -751,25 +766,25 @@ def status_reply(house: "House", area: "Area", command: QuickCommand, lang: str,
         rooms = place([e for e in catalog.entries(only_allowed=True) if e.type == "IRoomControllerV2"])
         if not rooms:
             return None
-        wert = ", ".join(f"{e.name}: {catalog.describe_state(e, state) or 'unbekannt'}" for e in rooms)
+        wert = ", ".join(_reading(e.name, catalog.describe_state(e, state)) for e in rooms)
     elif topic == "presence":
         people = place([e for e in catalog.entries(only_allowed=True) if e.type == "PresenceDetector"])
         if not people:
             return None
-        wert = ", ".join(f"{e.name}: {catalog.describe_state(e, state) or 'unbekannt'}" for e in people)
+        wert = ", ".join(_reading(e.name, catalog.describe_state(e, state)) for e in people)
     elif topic == "window":
         monitors = place([e for e in catalog.entries(only_allowed=True) if e.type == "WindowMonitor"])
         windows = place([e for e in catalog.entries(only_allowed=True) if e.type == "Window"])
         chosen = monitors or windows
         if not chosen:
             return None
-        wert = ", ".join(f"{e.name}: {catalog.describe_state(e, state) or 'unbekannt'}" for e in chosen)
+        wert = ", ".join(_reading(e.name, catalog.describe_state(e, state)) for e in chosen)
     else:
         probe = QuickCommand("up" if topic == "shade" else "on", command.room, command.prep, "shade" if topic == "shade" else "light")
         found, _ = targets(house, area, probe)
         if not found:
             return None
-        wert = ", ".join(f"{e.name}: {catalog.describe_state(e, state) or 'unbekannt'}" for e in found)
+        wert = ", ".join(_reading(e.name, catalog.describe_state(e, state)) for e in found)
     return book.pick("state", lang, anrede=anrede, wert=wert, raum="")
 
 
