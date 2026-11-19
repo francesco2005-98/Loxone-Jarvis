@@ -220,6 +220,67 @@ def test_kroko_wording_is_understood():
     assert quick.parse("Spiel den Favoriten Abend").action == "favorite"
     assert quick.parse("Gute Nacht").kind == "mood" and quick.parse("Gute Nacht").scene == "gute nacht"
     assert quick.parse("Mach gemütlich im Wohnzimmer").scene == "gemütlich"
+    for sentence in (
+        "Heizung auf Automatik",
+        "Stelle die Heizung auf Automatisch um",
+        "Kannst du die Heizung auf Automatik stellen",
+        "Schalt die Heizung in den Automatikmodus",
+        "Wechsel die Heizung bitte auf Heizen",
+        "Ich möchte die Heizung auf Kühlen umstellen",
+    ):
+        cmd = quick.parse(sentence)
+        assert cmd is not None and cmd.kind == "climate" and cmd.action == "mode", sentence
+    assert quick.parse("Stelle die Heizung im Bad auf 21 Grad ein").action == "temperature"
+    assert quick.parse("Kannst du das Licht anmachen").action == "on"
+    assert quick.parse("Würdest du bitte das Licht ausschalten").action == "off"
+    assert quick.parse("Lass die Rollos runterfahren").action == "down"
+    assert quick.parse("Zieh die Rollos hoch").action == "up"
+    assert quick.parse("Dreh die Musik lauter").action == "louder"
+    assert quick.parse("Brennt das Licht im Bad").kind == "status"
+    assert quick.parse("Ist die Heizung eingeschaltet").device == "climate"
+    assert quick.parse("Mach das Garagentor zu").action == "close"
+    assert quick.parse("Stelle die Heizung im Bad auf 21 Grad ein").value == 21
+    assert quick.parse("21 Grad im Bad").action == "temperature" and quick.parse("21 Grad im Bad").room == "bad"
+    assert quick.parse("Kannst du das Fenster zumachen").action == "close"
+    assert quick.parse("Kipp das Fenster im Bad").scene == "gekippt"
+    assert quick.parse("Garagentor aufmachen").action == "open"
+    assert quick.parse("Rollos zumachen").action == "down"
+    assert quick.parse("Zieh die Jalousien hoch").action == "up"
+    assert quick.parse("Stell das Licht auf Blau").scene == "blau"
+    assert quick.parse("Licht auf 40 Prozent dimmen").value == 40
+    assert quick.parse("Kannst du das Licht etwas heller machen").value == 12
+    assert quick.parse("Halt die Musik an").action == "pause"
+    assert quick.parse("Spiel weiter").action == "play"
+    assert quick.parse("Mach lauter").action == "louder"
+    assert quick.parse("Dreh die Musik auf 30 Prozent").action == "volume" and quick.parse("Dreh die Musik auf 30 Prozent").value == 30
+    assert quick.parse("Alarm scharf schalten").action == "arm"
+    assert quick.parse("Leuchtet das Licht").device == "light"
+    assert quick.parse("Sind die Rollos unten").device == "shade"
+    assert quick.parse("Ist es dunkel im Wohnzimmer").device == "light"
+    assert quick.parse("Haben wir das Licht an").device == "light"
+    assert quick.parse("Mach das Licht im Esszimmer an und die Rollos runter") is None
+    assert quick.parse("Schalt die Heizung in den Automatikmodus").room is None
+    assert quick.parse("Stell den Heizkörper auf Automatik").scene == "automatik"
+    assert quick.parse("Dreh die Heizung auf 21").value == 21
+    assert quick.parse("Mach überall das Licht an").scope == "house"
+    assert quick.parse("Halt die Beschattung an").action == "stop"
+    assert quick.parse("Mach die Rolläden zu").action == "down"
+    assert quick.parse("Lamellen auf").value == 0
+    assert quick.parse("Garagentor auf").action == "open"
+    assert quick.parse("Alarm aus").action == "disarm"
+    assert quick.parse("Schalt auf Heizen").scene == "heizen"
+    assert quick.parse("Kühlmodus").scene == "kühlen"
+    assert quick.parse("Auf Automatik stellen die Heizung").action == "mode"
+    assert quick.parse("Bitte das Licht im Flur dimmen auf 30 Prozent").room == "flur"
+    assert quick.parse("Bitte das Licht im Flur dimmen auf 30 Prozent").value == 30
+    assert quick.parse("Stell die Farbe auf Grün").scene == "grün"
+    assert quick.parse("Haben wir die Heizung an").device == "climate"
+    assert quick.parse("Spiel das nächste Lied").action == "next"
+    assert quick.parse("Favorit Abend").action == "favorite" and quick.parse("Favorit Abend").scene == "abend"
+    assert quick.parse("Mach es gemütlich").scene == "gemütlich"
+    assert quick.parse("21,5 Grad im Bad").value == 21.5
+    assert quick.parse("Mach die Heizung aus") is None
+    assert quick.parse("Klimaanlage aus") is None
 
 
 def test_rgb_scene_state_is_shown(home):

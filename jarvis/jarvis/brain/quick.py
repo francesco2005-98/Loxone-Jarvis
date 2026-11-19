@@ -25,14 +25,14 @@ if TYPE_CHECKING:
     from ..loxone.catalog import Entry
 
 _LIGHT = r"(?:das |die |den )?(?:licht|lichter|lampe|lampen|beleuchtung)"
-_SHADE = r"(?:die |den |das )?(?:rollo|rollos|rolllo|rolllos|rollladen|rolladen|rollläden|jalousie|jalousien|raffstore|raffstores|beschattung)"
+_SHADE = r"(?:die |den |das )?(?:rollo|rollos|rolllo|rolllos|rollladen|rolladen|rollläden|rolläden|jalousie|jalousien|raffstore|raffstores|beschattung)"
 # A misheard first word ("Bimm", "Fahrdi") is read as the command verb it sounds like.
 _COMMAND_VERBS = ("schalte", "mach", "fahr", "dimm", "stell")
 _PREP = r"(?P<prep>im|in der|in dem|in|auf der|auf dem|am|beim)"
 _ROOM = r"(?P<room>[a-zäöüß][a-zäöüß0-9\- ]{1,40}?)"
 # Recognition sometimes hears "macht" or "schaltet" for the spoken imperative.
-_VERB = r"(?:mal )?(?:(?:schalte|schalt|schaltet|mach|mache|macht)(?: mal)? )?(?:bitte )?(?:mal )?"
-_MOVE = r"(?:mal )?(?:(?:fahr|fahre|fahrt|mach|mache|macht)(?: mal)? )?(?:bitte )?(?:mal )?"
+_VERB = r"(?:mal )?(?:(?:schalte|schalt|schaltet|mach|mache|macht|stell|stelle|stellt|dreh|drehe)(?: mal)? )?(?:bitte )?(?:mal )?"
+_MOVE = r"(?:mal )?(?:(?:fahr|fahre|fahrt|zieh|ziehe|mach|mache|macht|stell|stelle|lass|lasse)(?: mal)? )?(?:bitte )?(?:mal )?"
 _DIMV = r"(?:mal )?(?:(?:dimm|dimme|dimmt|mach|mache|macht|stell|stelle|stellt|schalte|schaltet)(?: mal)? )?(?:bitte )?(?:mal )?"
 _STATE = r"(?P<state>anschalten|einschalten|ausschalten|anmachen|ausmachen|an|ein|aus|hell|dunkel)"
 _SHADE_STATE = r"(?P<state>hoch|rauf|ganz auf|ganz zu|auf|öffnen|runter|herunter|zu|schließen)(?: fahren)?"
@@ -60,6 +60,7 @@ _COLOR_WORD = "|".join(list(_COLORS) + list(_WHITES))
 PATTERNS: list[tuple[str, re.Pattern]] = [
     ("light", re.compile(rf"^{_VERB}(?P<all>alle |sämtliche )(?P<lightword>{_LIGHT})(?: {_PREP} {_ROOM})? (?:bitte )?{_STATE}{_END}$")),
     ("light", re.compile(rf"^{_VERB}(?P<lightword>{_LIGHT}) (?P<everywhere>überall|im ganzen haus) (?:bitte )?{_STATE}{_END}$")),
+    ("light", re.compile(rf"^{_VERB}(?P<everywhere>überall|im ganzen haus) {_LIGHT} (?:bitte )?{_STATE}{_END}$")),
     ("light", re.compile(rf"^(?:mach|mache|macht)(?: es)? (?P<state>hell|dunkel)(?: {_PREP} {_ROOM})?{_END}$")),
     ("light", re.compile(rf"^{_VERB}(?P<lightword>{_LIGHT})(?: {_PREP} {_ROOM})?{_SPOT} (?:bitte )?{_STATE}{_END}$")),
     ("light", re.compile(rf"^{_VERB}{_PREP} {_ROOM} {_LIGHT} {_STATE}{_END}$")),
@@ -72,25 +73,31 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     ("dim", re.compile(rf"^{_DIMV}{_PREP} {_ROOM} {_LIGHT} auf {_VALUE}{_END}$")),
     ("shade_pos", re.compile(rf"^{_MOVE}{_SHADE}(?: {_PREP} {_ROOM})? auf {_VALUE}{_END}$")),
     ("shade_pos", re.compile(rf"^{_MOVE}{_SHADE}(?: {_PREP} {_ROOM})? halb (?:zu|runter|auf|hoch|offen){_END}$")),
-    ("shade_stop", re.compile(rf"^(?:halt|halte|stoppe|stopp|stop)(?: mal)? (?:bitte )?{_SHADE}(?: {_PREP} {_ROOM})?{_END}$")),
+    ("shade_stop", re.compile(rf"^(?:halt|halte|stoppe|stopp|stop)(?: mal)? (?:bitte )?{_SHADE}(?: {_PREP} {_ROOM})?(?: an| ab)?{_END}$")),
     ("shade_stop", re.compile(rf"^{_MOVE}{_SHADE}(?: {_PREP} {_ROOM})? (?:anhalten|stopp|stop|halt){_END}$")),
-    ("shade", re.compile(rf"^{_MOVE}{_SHADE}(?: {_PREP} {_ROOM})? (?:bitte )?{_SHADE_STATE}{_END}$")),
+    ("shade", re.compile(rf"^{_MOVE}(?:alle |sämtliche )?{_SHADE}(?: {_PREP} {_ROOM})? (?:bitte )?{_SHADE_STATE}{_END}$")),
     ("shade", re.compile(rf"^{_MOVE}{_PREP} {_ROOM} {_SHADE} {_SHADE_STATE}{_END}$")),
     ("light", re.compile(r"^(?:please )?turn (?P<state>on|off) (?:the )?lights?(?: in (?:the )?(?P<room>[a-z][a-z\- ]{1,40}?))?(?: please)?$")),
     ("light", re.compile(r"^(?:please )?turn (?:the )?lights?(?: in (?:the )?(?P<room>[a-z][a-z\- ]{1,40}?))? (?P<state>on|off)(?: please)?$")),
-    ("status", re.compile(rf"^(?:ist|sind) {_LIGHT}(?: {_PREP} {_ROOM})? (?:gerade )?(?P<state>an|aus|ein)$")),
+    ("status", re.compile(rf"^(?:ist|sind|brennt|leuchtet|läuft) {_LIGHT}(?: {_PREP} {_ROOM})?(?: (?:gerade )?(?P<state>an|aus|ein|eingeschaltet|ausgeschaltet|hell|dunkel))?$")),
+    ("status", re.compile(rf"^(?:ist die |läuft die |ist |haben wir die |haben wir )heizung(?: {_PREP} (?P<room>[a-zäöüß0-9\-]+))?(?: (?:gerade )?(?P<state>an|aus|ein|eingeschaltet|ausgeschaltet))?$")),
+    ("status", re.compile(rf"^(?:ist es|haben wir das licht) (?:gerade )?(?P<state>hell|dunkel|an|aus)(?: {_PREP} {_ROOM})?$")),
+    ("status", re.compile(rf"^(?:haben wir) {_LIGHT}(?: {_PREP} {_ROOM})? (?:gerade )?(?P<state>an|aus|ein|eingeschaltet|ausgeschaltet)$")),
     ("status", re.compile(rf"^(?:ist|sind) {_WINDOW}(?: {_PREP} {_ROOM})? (?:gerade )?(?P<state>offen|auf|zu|geschlossen)$")),
     ("status", re.compile(rf"^(?:ist|sind) {_SHADE}(?: {_PREP} {_ROOM})? (?:gerade )?(?P<state>oben|unten|auf|zu|offen|geschlossen)$")),
     ("status", re.compile(rf"^(?:ist jemand|ist wer)(?: {_PREP} {_ROOM}| da| zuhause| zu hause)?$")),
     ("status", re.compile(r"^(?:wie viel|wieviel) (?:strom|verbrauch|energie)(?: verbrauchen wir| ziehen wir| haben wir)?$")),
-    ("music", re.compile(r"^(?:etwas |ein bisschen )?(?P<music>lauter|leiser)(?: machen)?$")),
-    ("music", re.compile(r"^(?:mach |schalte )?(?:bitte )?(?:die |das )?musik (?P<music>aus|an|pause|weiter|lauter|leiser|stopp)$")),
-    ("music", re.compile(r"^(?:musik )?(?P<music>pause|pausieren|weiter)$")),
-    ("music", re.compile(r"^(?:nächstes|nächster) (?:lied|titel|song)$")),
+    ("music", re.compile(r"^(?:dreh |drehe |mach |mache )?(?:die |das )?(?:musik )?(?:etwas |ein bisschen )?(?P<music>lauter|leiser)(?: machen)?$")),
+    ("music", re.compile(r"^(?:halt|halte|stoppe|stopp|stop)(?: mal)? (?:die |das )?musik(?: (?P<music>an|ab|aus))?$")),
+    ("music", re.compile(r"^(?:dreh |drehe |mach |mache |schalte |schalt )?(?:die |das )?musik (?P<music>aus|an|pause|weiter|lauter|leiser|stopp|anhalten)$")),
+    ("music", re.compile(r"^(?:spiel |spiele )?(?:die musik )?(?P<music>pause|pausieren|weiter)$")),
+    ("music", re.compile(rf"^(?:dreh |drehe |mach |stell |stelle )?(?:die |das )?(?:musik |lautstärke |musik lautstärke )auf {_VALUE}$")),
+    ("music", re.compile(r"^(?:spiel |spiele )?(?:mal )?(?:das |den )?(?:nächste|nächstes|nächster) (?:lied|titel|song)$")),
     ("music", re.compile(r"^(?:vorheriges|vorheriger|letztes) (?:lied|titel|song)$")),
     ("music", re.compile(rf"^(?:lautstärke|musik lautstärke) auf {_VALUE}$")),
-    ("music", re.compile(rf"^(?:spiel|spiele) (?:bitte )?(?:den |die )?(?:favoriten|favorit) (?P<fav>[a-zäöüß0-9][a-zäöüß0-9\- ]{{1,40}}?)(?: {_PREP} {_ROOM})?$")),
+    ("music", re.compile(rf"^(?:spiel |spiele )?(?:bitte )?(?:den |die )?(?:favoriten|favorit) (?P<fav>[a-zäöüß0-9][a-zäöüß0-9\- ]{{1,40}}?)(?: {_PREP} {_ROOM})?$")),
     ("music", re.compile(rf"^(?:spiel|spiele) (?:bitte )?(?:mal )?(?:etwas )?(?P<query>[a-zäöüß0-9][a-zäöüß0-9\- ]{{1,40}}?)(?: {_PREP} {_ROOM})?$")),
+    ("alarm", re.compile(r"^(?:mach |schalte |stell )?(?:bitte )?(?:den |die |das )?alarm (?P<state>scharf|unscharf|an|aus|ein)$")),
     ("named", re.compile(rf"^{_VERB}{_DEVICE}(?: {_PREP} {_ROOM})?{_SPOT} (?:bitte )?{_STATE}{_END}$")),
     ("named", re.compile(rf"^{_VERB}{_PREP} {_ROOM} {_DEVICE}{_SPOT} {_STATE}{_END}$")),
     ("temp", re.compile(rf"^(?:wie warm|wie kalt|welche temperatur|wie viel grad|wieviel grad)(?: ist es| hat es| haben wir| herrscht)?(?: {_PREP} {_ROOM}| (?P<outside>draußen|draussen|außen|aussen|im freien))?{_END}$")),
@@ -106,27 +113,24 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     ("time", re.compile(r"^(?:what time is it|what's the time|what is the time)(?: please)?$")),
     ("date", re.compile(r"^(?:welcher tag ist heute|welches datum (?:haben wir|ist heute)|der wievielte ist heute|was ist heute für ein tag)$")),
     ("date", re.compile(r"^(?:what day is it|what's the date|what is the date)(?: today)?$")),
-    ("climate", re.compile(rf"^(?:stell|stelle|mach|heiz|heize)(?: bitte)? (?:die |das )?(?:heizung|temperatur)(?: {_PREP} {_ROOM})? auf (?P<value>\d{{1,2}}(?:[.,]\d)?) ?grad{_END}$")),
+    ("climate", re.compile(rf"^(?:stell|stelle|setz|setze|mach|dreh|drehe|regel|regle|heiz|heize)? ?(?:die |das |den |der )?(?:heizung|temperatur)(?: {_PREP} {_ROOM})? auf (?P<value>\d{{1,2}}(?:[.,]\d)?) ?(?:grad|°)?{_END}$")),
     ("climate", re.compile(rf"^(?:heizung|temperatur)(?: {_PREP} {_ROOM})? auf (?P<value>\d{{1,2}}(?:[.,]\d)?) ?grad{_END}$")),
-    ("climate", re.compile(rf"^(?:stell|stelle|schalte)(?: bitte)? (?:die )?heizung(?: {_PREP} {_ROOM})? auf (?P<mode>automatik|auto|heizen|kühlen|kuehlen|manuell){_END}$")),
-    ("window", re.compile(rf"^(?P<state>öffne|oeffne|schließe|schliesse|schließ|schliess)(?: mal)? (?:bitte )?{_WINDOW}(?: {_PREP} {_ROOM})?{_END}$")),
-    ("window", re.compile(rf"^(?:mach|mache|öffne|oeffne|schließe|schliesse|schließ|schliess|fahr|fahre)(?: mal)? (?:bitte )?{_WINDOW}(?: {_PREP} {_ROOM})? (?P<state>auf|zu|öffnen|oeffnen|schließen|schliessen|stopp|anhalten){_END}$")),
-    ("window", re.compile(rf"^{_WINDOW}(?: {_PREP} {_ROOM})? (?P<state>auf|zu|öffnen|schließen|schliessen|stopp|anhalten|kippen){_END}$")),
+    ("climate", re.compile(rf"^(?:stell|stelle|setz|setze|dreh|drehe|mach) (?:sie |es )?auf (?P<value>\d{{1,2}}(?:[.,]\d)?) ?(?:grad|°)(?: {_PREP} {_ROOM})?{_END}$")),
+    ("climate", re.compile(rf"^(?P<value>\d{{1,2}}(?:[.,]\d)?) ?(?:grad|°)(?: {_PREP} {_ROOM})?{_END}$")),
+    ("climate", re.compile(rf"^(?:(?:stell|stelle|schalte|schalt|setze|setz|drehe|dreh|wechsel|wechsle|mach|mache|regel|regle) )?(?:die |das |den |der )?(?:heizung|temperatur)(?: {_PREP} {_ROOM})? (?:auf |in den |in |zum |zur )?(?P<mode>automatik|auto|heizen|kühlen|kuehlen|manuell)(?: modus| betrieb)?{_END}$")),
+    ("climate", re.compile(rf"^(?:schalt|schalte|stell|stelle|wechsel|wechsle|setz|setze|mach|dreh|drehe) auf (?P<mode>automatik|auto|heizen|kühlen|kuehlen|manuell){_END}$")),
+    ("window", re.compile(rf"^(?P<state>öffne|oeffne|schließe|schliesse|schließ|schliess|kipp|kippe)(?: mal)? (?:bitte )?(?:alle )?{_WINDOW}(?: {_PREP} {_ROOM})?{_END}$")),
+    ("window", re.compile(rf"^(?:mach|mache|öffne|oeffne|schließe|schliesse|schließ|schliess|fahr|fahre|kipp|kippe)(?: mal)? (?:bitte )?(?:alle )?{_WINDOW}(?: {_PREP} {_ROOM})? (?P<state>auf|zu|öffnen|oeffnen|schließen|schliessen|stopp|anhalten|kipp|auf kipp){_END}$")),
+    ("window", re.compile(rf"^(?:alle )?{_WINDOW}(?: {_PREP} {_ROOM})? (?P<state>auf|zu|öffnen|schließen|schliessen|stopp|anhalten|kippen|kipp|auf kipp){_END}$")),
     ("window", re.compile(rf"^(?:mach|fahr)(?: mal)? (?:bitte )?{_WINDOW}(?: {_PREP} {_ROOM})? auf {_VALUE}{_END}$")),
     ("window", re.compile(rf"^{_WINDOW}(?: {_PREP} {_ROOM})? auf {_VALUE}{_END}$")),
     ("slat", re.compile(rf"^(?:fahr|stell|mach)(?: mal)? (?:bitte )?(?:die )?lamellen(?: {_PREP} {_ROOM})? auf {_VALUE}{_END}$")),
     ("slat", re.compile(rf"^(?:fahr|stell|mach)(?: mal)? (?:bitte )?(?:die )?lamellen(?: {_PREP} {_ROOM})? (?P<state>auf|zu|offen){_END}$")),
-    ("color", re.compile(rf"^{_VERB}{_LIGHT}(?: {_PREP} {_ROOM})? (?P<color>{_COLOR_WORD}){_END}$")),
+    ("slat", re.compile(rf"^(?:die )?lamellen(?: {_PREP} {_ROOM})? (?P<state>auf|zu|offen|hoch|runter){_END}$")),
+    ("color", re.compile(rf"^{_VERB}{_LIGHT}(?: {_PREP} {_ROOM})? (?:auf )?(?P<color>{_COLOR_WORD}){_END}$")),
+    ("color", re.compile(rf"^(?:stell |stelle |mach |mache |schalte |schalt )?{_VERB}(?:die |das )?farbe(?: {_PREP} {_ROOM})? (?:auf )?(?P<color>{_COLOR_WORD}){_END}$")),
     ("gate", re.compile(rf"^(?:mach|mache|öffne|oeffne|schließe|schliesse|schließ|schliess|fahr)(?: mal)? (?:bitte )?{_GATE} (?P<state>auf|zu|öffnen|oeffnen|schließen|schliessen|stopp){_END}$")),
-    ("alarm", re.compile(r"^(?:mach |schalte )?(?:bitte )?(?:den |die )?alarm (?P<state>scharf|unscharf|an|aus)$")),
-    ("music", re.compile(r"^(?:etwas |ein bisschen )?(?P<music>lauter|leiser)(?: machen)?$")),
-    ("music", re.compile(r"^(?:mach |schalte )?(?:bitte )?(?:die |das )?musik (?P<music>aus|an|pause|weiter|lauter|leiser|stopp)$")),
-    ("music", re.compile(r"^(?:musik )?(?P<music>pause|pausieren|weiter)$")),
-    ("music", re.compile(r"^(?:nächstes|nächster|nächster) (?:lied|titel|song)$")),
-    ("music", re.compile(r"^(?:vorheriges|vorheriger|letztes) (?:lied|titel|song)$")),
-    ("music", re.compile(rf"^(?:lautstärke|musik lautstärke) auf {_VALUE}$")),
-    ("music", re.compile(rf"^(?:spiel|spiele) (?:bitte )?(?:den |die )?(?:favoriten|favorit) (?P<fav>[a-zäöüß0-9][a-zäöüß0-9\- ]{{1,40}}?)(?: {_PREP} {_ROOM})?$")),
-    ("music", re.compile(rf"^(?:spiel|spiele) (?:bitte )?(?:mal )?(?:etwas )?(?P<query>[a-zäöüß0-9][a-zäöüß0-9\- ]{{1,40}}?)(?: {_PREP} {_ROOM})?$")),
+    ("gate", re.compile(rf"^{_GATE} (?P<state>auf|zu|öffnen|oeffnen|schließen|schliessen|stopp){_END}$")),
 ]
 
 _WAKE = re.compile(rf"^(?:(?:hey|hallo|ok|okay) )?{WAKE_WORD}\b ?")
@@ -148,6 +152,21 @@ _DEVICE_KINDS = {
     "alarm": "alarm",
 }
 _CLIMATE_MODES = {"automatik": 0, "auto": 0, "heizen": 1, "kühlen": 2, "kuehlen": 2, "manuell": 3}
+_TAIL = {
+    "anmachen": ("mach", "an"), "anschalten": ("schalte", "an"), "anstellen": ("mach", "an"),
+    "ausmachen": ("mach", "aus"), "ausschalten": ("schalte", "aus"), "abstellen": ("mach", "aus"), "ausstellen": ("mach", "aus"),
+    "einschalten": ("schalte", "ein"), "aufmachen": ("mach", "auf"), "zumachen": ("mach", "zu"),
+    "umschalten": ("stell", ""),
+    "runterlassen": ("fahr", "runter"), "runterfahren": ("fahr", "runter"), "absenken": ("fahr", "runter"),
+    "hochfahren": ("fahr", "hoch"), "hochlassen": ("fahr", "hoch"), "aufziehen": ("fahr", "hoch"), "hochziehen": ("fahr", "hoch"),
+    "zuziehen": ("fahr", "zu"), "runterziehen": ("fahr", "runter"),
+    "stellen": ("stell", ""), "umstellen": ("stell", ""), "einstellen": ("stell", ""), "schalten": ("schalte", ""),
+    "machen": ("mach", ""), "fahren": ("fahr", ""),
+    "dimmen": ("dimm", ""), "drehen": ("dreh", ""), "aufdrehen": ("mach", "auf"), "zudrehen": ("mach", "zu"),
+    "öffnen": ("mach", "auf"), "oeffnen": ("mach", "auf"), "schließen": ("mach", "zu"), "schliessen": ("mach", "zu"),
+    "setzen": ("stell", ""), "regeln": ("stell", ""), "aktivieren": ("aktiviere", ""), "starten": ("starte", ""),
+    "kippen": ("kipp", ""), "anheben": ("fahr", "hoch"), "löschen": ("mach", "aus"),
+}
 _STOP = {"das", "die", "den", "der", "dem", "im", "in", "am", "an", "beim", "bei", "über", "neben", "hinter", "mal", "bitte"}
 _WEAK = {"licht", "lichter", "beleuchtung", "lampe", "lampen", "leuchte"}
 _SYNONYMS = {"fernseher": "tv", "fernsehen": "tv", "fernseh": "tv", "glotze": "tv", "esstisch": "tisch", "couch": "sofa"}
@@ -172,16 +191,87 @@ class QuickCommand:
 
 
 def _norm(text: str) -> str:
-    text = re.sub(r"[.,!?;:„“\"']", " ", text.lower()).replace("oeffnen", "öffnen").replace("schliessen", "schließen")
+    text = re.sub(r"(\d),(\d)", r"\1.\2", text.lower())
+    text = re.sub(r"[!?;:„“\"',]", " ", text)
+    text = re.sub(r"\.(?!\d)|(?<!\d)\.", " ", text)
+    text = text.replace("oeffnen", "öffnen").replace("schliessen", "schließen")
     return re.sub(r"\s+", " ", text).strip()
 
 
-def parse(text: str) -> QuickCommand | None:
-    sentence = _WAKE.sub("", _norm(text)).strip()
-    sentence = re.sub(r"^(?:kannst du |könntest du |würdest du |magst du )", "", sentence)
-    sentence = re.sub(r"^(?:lass|lasse) ", "mach ", sentence)
-    sentence = re.sub(r"\b(?:hier|doch|eben|schnell|kurz)\b", " ", sentence)
+def _loosen(sentence: str) -> str:
+    """Fold polite wrappers, synonyms and a verb at the end into the shape the patterns know."""
+    sentence = re.sub(
+        r"^(?:ich möchte(?: dass du| gerne| gern)? |ich hätte gern(?:e)? |ich will |bitte |"
+        r"sei so gut und |kannst du (?:mir |uns |bitte |mal )*|könntest du (?:mir |uns |bitte |mal )*|"
+        r"würdest du (?:mir |uns |bitte |mal )*|magst du (?:mir |bitte |mal )*)",
+        "",
+        sentence,
+    )
+    sentence = re.sub(r"\b(?:hier|doch|eben|schnell|kurz|bitte|mal|jetzt|gleich|einmal|ruhig|einfach)\b", " ", sentence)
     sentence = re.sub(r"\b(an|aus|ein) (machen|schalten)\b", r"\1\2", sentence)
+    for pattern, repl in (
+        (r"\bautomatisch(?:e|en|er|em)?\b", "automatik"),
+        (r"\bautomatikmodus\b", "automatik"),
+        (r"\bautomodus\b", "automatik"),
+        (r"\bheizbetrieb\b", "heizen"),
+        (r"\bheizmodus\b", "heizen"),
+        (r"\bkühlbetrieb\b", "kühlen"),
+        (r"\bkuehlbetrieb\b", "kühlen"),
+        (r"\bkühlmodus\b", "kühlen"),
+        (r"\bheizkörper\b", "heizung"),
+        (r"\bthermostat\b", "heizung"),
+        (r"\braumregler\b", "heizung"),
+        (r"\btemperaturregler\b", "heizung"),
+        (r"\bklimaanlage\b", "heizung"),
+        (r"\bjalousien\b", "jalousie"),
+        (r"\brollläden\b", "rollladen"),
+        (r"\brolllaeden\b", "rollladen"),
+        (r"\bgaragentür\b", "garagentor"),
+        (r"\brolläden\b", "rollladen"),
+    ):
+        sentence = re.sub(pattern, repl, sentence)
+    sentence = re.sub(r"\b(?:in den|in dem|zum|zur) (automatik|heizen|kühlen|manuell)\b", r"auf \1", sentence)
+    flipped = re.match(
+        r"^auf (automatik|heizen|kühlen|manuell) (?:stellen|umstellen|schalten|machen|setzen) (?:die |das |den |der )?(heizung|temperatur)$",
+        sentence,
+    )
+    if flipped:
+        sentence = f"stell die {flipped.group(2)} auf {flipped.group(1)}"
+    if sentence in {"automatik", "heizen", "kühlen", "manuell"}:
+        sentence = f"heizung {sentence}"
+    if "erinner" not in sentence:
+        sentence = re.sub(r"\s+um$", "", sentence)
+    sentence = re.sub(r"\s+", " ", sentence).strip()
+    middle = re.match(r"^(?P<body>.+?) (?P<verb>dimmen|stellen|umstellen|fahren|machen|schalten|drehen|setzen|regeln) (?P<rest>auf .+)$", sentence)
+    if middle and middle.group("verb") in _TAIL:
+        front, particle = _TAIL[middle.group("verb")]
+        body = middle.group("body")
+        if particle and not body.endswith(" " + particle):
+            body = f"{body} {particle}"
+        sentence = f"{front} {body} {middle.group('rest')}".strip()
+    tail = re.match(r"^(?P<body>.+?) (?P<verb>[a-zäöüß]+)$", sentence)
+    if tail and tail.group("verb") in _TAIL:
+        front, particle = _TAIL[tail.group("verb")]
+        body = tail.group("body")
+        first = body.split(" ", 1)[0]
+        if particle and not body.endswith(" " + particle):
+            body = f"{body} {particle}"
+        if first not in {"mach", "mache", "fahr", "fahre", "stell", "stelle", "schalte", "schalt", "lass", "lasse", "dimm", "öffne", "schließ", "zieh", "ziehe"}:
+            sentence = f"{front} {body}".strip()
+        else:
+            sentence = body
+    sentence = re.sub(r"^(?:lass|lasse) ", "mach ", sentence)
+    if (
+        re.match(r"^(?:stell|stelle|setz|setze|regel|regle|dreh|drehe) ", sentence)
+        and sentence.endswith(" ein")
+        and re.search(r"\b(?:grad|prozent|%|automatik|heizen|kühlen|manuell)\b", sentence)
+    ):
+        sentence = sentence[:-4]
+    return re.sub(r"\s+", " ", sentence).strip()
+
+
+def parse(text: str) -> QuickCommand | None:
+    sentence = _loosen(_WAKE.sub("", _norm(text)).strip())
     sentence = sentence.replace("auf die hälfte", "auf 50 prozent").replace("auf die haelfte", "auf 50 prozent")
     sentence = sentence.replace("auf halb", "auf 50 prozent")
     sentence = re.sub(r"\s+", " ", sentence).strip()
@@ -191,7 +281,7 @@ def parse(text: str) -> QuickCommand | None:
     found = _parse_sentence(sentence)
     if found is None:
         mood = re.match(
-            rf"^(?:mach |mache |schalte |starte )?(?:bitte )?(?:mal )?(?P<mood>gute nacht|gemütlich|fernsehen|entspannen|lesen|kino)(?: {_PREP} {_ROOM})?$",
+            rf"^(?:mach |mache |schalte |starte )?(?:es |bitte |mal )*(?P<mood>gute nacht|gemütlich|fernsehen|entspannen|lesen|kino)(?: {_PREP} {_ROOM})?$",
             sentence,
         )
         if mood:
@@ -255,7 +345,7 @@ def _parse_sentence(sentence: str) -> QuickCommand | None:
                 if number is None or not 0 <= int(number) <= 100:
                     return None
                 return QuickCommand("position", room, groups.get("prep"), "window", int(number))
-            if state == "kippen":
+            if state in {"kippen", "kipp", "auf kipp"} or sentence.startswith(("kipp ", "kippe ")):
                 return QuickCommand("position", room, groups.get("prep"), "window", 12, scene="gekippt")
             if state in {"zu", "schließen", "schliessen"} or state.startswith("schließ") or state.startswith("schlies"):
                 return QuickCommand("close", room, groups.get("prep"), "window")
@@ -269,7 +359,7 @@ def _parse_sentence(sentence: str) -> QuickCommand | None:
                     return None
                 value = int(number)
             else:
-                value = 0 if groups.get("state") in {"auf", "offen"} else 100
+                value = 0 if groups.get("state") in {"auf", "offen", "hoch"} else 100
             return QuickCommand("slat", room, groups.get("prep"), "slat", value)
         if kind == "color":
             color = groups["color"]
@@ -288,6 +378,8 @@ def _parse_sentence(sentence: str) -> QuickCommand | None:
                 topic = "window"
             elif groups.get("state") and re.search(r"rollo|jalousie|beschattung|raffstore", sentence):
                 topic = "shade"
+            elif "heizung" in sentence:
+                topic = "climate"
             elif "jemand" in sentence or "wer" in sentence:
                 topic = "presence"
             elif "strom" in sentence or "verbrauch" in sentence or "energie" in sentence:
@@ -309,6 +401,8 @@ def _parse_sentence(sentence: str) -> QuickCommand | None:
                     return None
                 return QuickCommand("search", room, groups.get("prep"), "music", scene=query)
             word = (groups.get("music") or "").strip()
+            if sentence.startswith(("halt ", "halte ", "stopp", "stoppe ", "stop ")) and "musik" in sentence:
+                word = "aus"
             if not word and "nächst" in sentence:
                 word = "next"
             if not word and "vorher" in sentence or sentence.startswith("letztes"):
@@ -345,6 +439,8 @@ def _parse_sentence(sentence: str) -> QuickCommand | None:
             return QuickCommand(action, room, groups.get("prep"), "kind", light_kind=wanted)
         if kind == "named":
             device = " ".join(filter(None, [groups["device"], groups.get("spot")]))
+            if re.search(r"\b(?:heizung|temperatur)\b", device):
+                continue
             return QuickCommand(action, room, groups.get("prep"), "named", device=device)
         scope = "house" if groups.get("everywhere") else ("all" if (groups.get("all") or "").strip() else None)
         return QuickCommand("on" if groups["state"] in _ON else "off", room, groups.get("prep"), "light", scope=scope)
@@ -651,6 +747,11 @@ def status_reply(house: "House", area: "Area", command: QuickCommand, lang: str,
         if not parts:
             return None
         wert = "; ".join(parts)
+    elif topic == "climate":
+        rooms = place([e for e in catalog.entries(only_allowed=True) if e.type == "IRoomControllerV2"])
+        if not rooms:
+            return None
+        wert = ", ".join(f"{e.name}: {catalog.describe_state(e, state) or 'unbekannt'}" for e in rooms)
     elif topic == "presence":
         people = place([e for e in catalog.entries(only_allowed=True) if e.type == "PresenceDetector"])
         if not people:
