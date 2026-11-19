@@ -661,6 +661,8 @@ class Coordinator:
         )
         instant = await self._quick(turn)
         if instant is not None:
+            if turn.pending is not None:
+                session.pending = turn.pending
             _remember(session, text, instant)
             if turn.done and self._may_suggest(area):
                 session.suggestion = asyncio.ensure_future(self.house.brain.suggest(turn))
@@ -783,10 +785,26 @@ class Coordinator:
             return quick.temperature_reply(self.house, turn.area, command, turn.lang, anrede, book)
         if command.kind in ("timer", "reminder", "timer_left", "timer_cancel"):
             return self._quick_timer(turn, command, anrede)
+        if command.kind == "music":
+            return await self._quick_music(turn, command, anrede)
+        if command.kind == "status":
+            return quick.status_reply(self.house, turn.area, command, turn.lang, anrede, book)
         entries, room = quick.targets(self.house, turn.area, command)
         if not entries:
             return None
-        value = command.scene or (str(command.value) if command.value is not None else None)
+        if command.kind in ("gate", "alarm"):
+            verb = {"open": "öffnen", "close": "schließen", "stop": "anhalten", "arm": "scharf schalten", "disarm": "ausschalten"}.get(command.action, command.action)
+            names = " und ".join(entry.name for entry in entries)
+            question = book.pick("confirm_ask", turn.lang, anrede=anrede, wert=f"{names} {verb}", raum="")
+            turn.pending = Pending("control", question, [(entry, command.action, None, None) for entry in entries], lang=turn.lang)
+            return question
+        if command.kind == "mood":
+            value = command.scene
+        elif command.value is not None:
+            value = str(command.value)
+        else:
+            value = command.scene
+        value2 = command.value2
         action = command.action
         levels: list[int] = []
         if action == "rel":
@@ -806,12 +824,61 @@ class Coordinator:
                 one = value
                 if action == "rel":
                     one = str(levels[index])
-                result = await self.house.brain.runner.execute(entry, command.action, one, None, turn)
+                result = await self.house.brain.runner.execute(entry, command.action, one, value2, turn)
                 ok = ok and bool(result.get("ok"))
             except Exception:  # noqa: BLE001
                 log.exception("quick command failed")
                 ok = False
         return confirmation if ok else quick.reply(command, room, turn.lang, anrede, False, book)
+
+    async def _quick_music(self, turn: Turn, command: quick.QuickCommand, anrede: str | None) -> str | None:
+        """Pause, volume, favourites and Spotify search, on the zone of this room."""
+        house = self.house
+        zone = house.zone_of(turn.area)
+        if command.room:
+            named = house.areas.find(command.room)
+            zone = house.zone_of(named) if named is not None else None
+            if zone is None:
+                for candidate in house.miniserver.structure.zones():
+                    if quick._room_key(candidate.name) == quick._room_key(command.room) or (
+                        candidate.room and quick._room_key(candidate.room) == quick._room_key(command.room)
+                    ):
+                        zone = candidate
+                        break
+        if zone is None:
+            return None
+        book = house.phrases
+        try:
+            if command.action == "search":
+                title = await house.play_query(zone, command.scene or "")
+                turn.done.append(f"Musik {title}")
+                return book.pick("music", turn.lang, anrede=anrede, wert=title, raum="")
+            if command.action == "favorite":
+                await house.play_favorite(zone, command.scene or "")
+                turn.done.append(f"Musik {command.scene}")
+                return book.pick("music", turn.lang, anrede=anrede, wert=command.scene or "", raum="")
+            cmd = {"play": "play", "pause": "pause", "next": "next", "previous": "prev", "louder": "volUp", "quieter": "volDown"}.get(command.action)
+            if command.action == "volume":
+                cmd = f"volume/{max(0, min(100, int(command.value or 0)))}"
+            if cmd is None:
+                return None
+            reply = await house.miniserver.command(zone.uuid, cmd)
+            if not reply.ok:
+                return book.pick("failed", turn.lang, anrede=anrede)
+        except Exception:  # noqa: BLE001
+            log.exception("quick music failed")
+            return book.pick("failed", turn.lang, anrede=anrede)
+        spoken = {
+            "pause": "pausiert",
+            "play": "läuft weiter",
+            "next": "nächster Titel",
+            "previous": "vorheriger Titel",
+            "louder": "lauter",
+            "quieter": "leiser",
+            "volume": f"auf {int(command.value or 0)} Prozent",
+        }.get(command.action, command.action)
+        turn.done.append(f"Musik {command.action}")
+        return book.pick("music", turn.lang, anrede=anrede, wert=spoken, raum="")
 
     def _quick_timer(self, turn: Turn, command: quick.QuickCommand, anrede: str | None) -> str | None:
         house = self.house

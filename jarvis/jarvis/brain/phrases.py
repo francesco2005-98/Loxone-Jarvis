@@ -27,13 +27,16 @@ log = logging.getLogger(__name__)
 
 INTENTS = (
     "light_on", "light_off", "dim", "scene", "shade_up", "shade_down", "shade_stop", "shade_set",
+    "state", "window", "slat", "climate", "color", "music", "confirm_ask",
     "time", "date", "temperature", "failed", "offline",
     "offer_done", "offer_declined",
     "timer_set", "reminder_set", "timer_left", "timer_none", "timer_cancel", "timer_due", "timer_due_plain", "reminder_due",
 )
 REQUIRED = {
     "light_on": "{raum}", "light_off": "{raum}", "shade_up": "{raum}", "shade_down": "{raum}", "shade_stop": "{raum}",
-    "dim": "{wert}", "scene": "{wert}", "shade_set": "{wert}", "temperature": "{wert}", "time": "{uhrzeit}", "date": "{datum}",
+    "dim": "{wert}", "scene": "{wert}", "shade_set": "{wert}", "state": "{wert}", "window": "{wert}",
+    "slat": "{wert}", "climate": "{wert}", "color": "{wert}", "music": "{wert}", "confirm_ask": "{wert}",
+    "temperature": "{wert}", "time": "{uhrzeit}", "date": "{datum}",
     "timer_set": "{wert}", "reminder_set": "{wert}", "timer_left": "{wert}", "timer_due": "{wert}", "reminder_due": "{wert}",
 }
 PLACEHOLDERS = ("{raum}", "{, anrede}", "{wert}", "{uhrzeit}", "{datum}")
@@ -166,6 +169,40 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
             "Erinnerung{, anrede}: {wert}.",
             "Sie wollten daran denken{, anrede}: {wert}.",
         ],
+        "state": [
+            "{wert}{, anrede}.",
+            "Gerade: {wert}{, anrede}.",
+            "Nach dem Stand: {wert}{, anrede}.",
+        ],
+        "window": [
+            "Das Fenster {raum} geht {wert}{, anrede}.",
+            "Sehr wohl{, anrede}. Fenster {raum} {wert}.",
+            "Ist veranlasst{, anrede}. Fenster {raum} {wert}.",
+        ],
+        "slat": [
+            "Lamellen {raum} auf {wert} Prozent{, anrede}.",
+            "Sehr wohl{, anrede}. Lamellen {wert} Prozent {raum}.",
+        ],
+        "climate": [
+            "Die Heizung {raum} steht auf {wert}{, anrede}.",
+            "Sehr wohl{, anrede}. {wert} {raum}.",
+            "Ist eingestellt{, anrede}. Heizung {raum} auf {wert}.",
+        ],
+        "color": [
+            "Das Licht {raum} wird {wert}{, anrede}.",
+            "Sehr wohl{, anrede}. {wert} {raum}.",
+            "Farbe {wert} {raum}{, anrede}.",
+        ],
+        "music": [
+            "Sehr wohl{, anrede}. {wert}.",
+            "Musik {wert}{, anrede}.",
+            "Ist veranlasst{, anrede}. {wert}.",
+        ],
+        "confirm_ask": [
+            "Soll ich {wert}{, anrede}?",
+            "Darf ich {wert}{, anrede}?",
+            "Wirklich {wert}{, anrede}?",
+        ],
     },
     "en": {
         "light_on": ["Very good{, anrede}. Lights {raum} are on.", "Lights {raum} on{, anrede}.", "Done{, anrede}. Let there be light {raum}."],
@@ -191,6 +228,13 @@ DEFAULT: dict[str, dict[str, list[str]]] = {
         "timer_due": ["Pardon me{, anrede}, time is up for {wert}.", "Your {wert} timer is done{, anrede}."],
         "timer_due_plain": ["Pardon me{, anrede}, your timer is done.", "Time is up{, anrede}."],
         "reminder_due": ["A reminder{, anrede}: {wert}.", "You wanted me to remind you{, anrede}: {wert}."],
+        "state": ["{wert}{, anrede}.", "Right now: {wert}{, anrede}."],
+        "window": ["The window {raum} is going {wert}{, anrede}.", "Very good{, anrede}. Window {raum} {wert}."],
+        "slat": ["Slats {raum} at {wert} percent{, anrede}.", "Very good{, anrede}. Slats at {wert} percent."],
+        "climate": ["Heating {raum} set to {wert}{, anrede}.", "Very good{, anrede}. {wert} {raum}."],
+        "color": ["The light {raum} turns {wert}{, anrede}.", "Very good{, anrede}. {wert} {raum}."],
+        "music": ["Very good{, anrede}. {wert}.", "Music {wert}{, anrede}."],
+        "confirm_ask": ["Shall I {wert}{, anrede}?", "May I {wert}{, anrede}?"],
     },
 }
 
@@ -202,7 +246,11 @@ Platzhalter exakt so übernehmen:
 - {wert}: Prozentzahl in dim, Name der Stimmung in scene, Temperatur in temperature; dort Pflicht. {uhrzeit}: Uhrzeit, Pflicht in time. {datum}: Datum, Pflicht in date.
 Situationen: light_on (Licht an), light_off (Licht aus), dim (Licht gedimmt), scene (Lichtstimmung {wert} aktiv),
 shade_up (Rollos hoch), shade_down (Rollos runter), shade_stop (Rollos angehalten, {raum} Pflicht),
-shade_set (Rollos auf {wert} Prozent, {wert} und {raum} Pflicht), time (Uhrzeit nennen), date (Datum nennen),
+shade_set (Rollos auf {wert} Prozent, {wert} und {raum} Pflicht),
+state (Zustand vorlesen, {wert} ist der ganze Stand), window (Fenster, {wert} ist auf, zu oder eine Stellung),
+slat (Lamellen auf {wert} Prozent), climate (Heizung auf {wert}), color (Lichtfarbe {wert}),
+music ({wert} ist pausiert, der Titel oder lauter), confirm_ask (Ja/Nein-Frage, {wert} ist die Handlung),
+time (Uhrzeit nennen), date (Datum nennen),
 temperature (Temperatur {wert} nennen, {raum} wie "im Bad" oder "draußen"),
 failed (Aktion fehlgeschlagen), offline (KI nicht erreichbar, Licht und Rollos funktionieren weiter),
 offer_done (dein eigener Vorschlag wurde nach einem Ja ausgeführt, sehr kurz),

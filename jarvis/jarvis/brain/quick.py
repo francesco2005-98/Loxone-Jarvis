@@ -1,10 +1,9 @@
-"""Instant handling of the most common sentences, without a round trip to Gemini.
+"""Instant handling of house sentences, without a round trip to Gemini.
 
-Lights on, off or dimmed, a named light circuit ("die indirekte Beleuchtung am
-Fernseher"), direct or indirect light, a light mood, blinds up or down,
-optionally in a named room, plus time and date. Only whole sentences that match
-exactly and resolve to one clear device set are taken, everything else goes to
-Gemini.
+Lights, shades, windows, heating, colour, music, readings, timers, time and
+date. Garage and alarm ask for a spoken yes first. Only a sentence that matches
+exactly and resolves to one clear device set is taken. Everything else, including
+weather and open questions, still goes to Gemini.
 """
 
 from __future__ import annotations
@@ -49,6 +48,15 @@ _TIMER_WORD = r"(?:einen |nen |den |ein )?(?:timer|wecker|kurzzeitwecker|eieruhr
 _REASON = r"(?: (?P<reason>(?:da|dann|weil|denn|wegen|damit|für|bis|zum|zur|das) .+))?"
 _REASON_WORDS = {"da", "dann", "weil", "denn", "wegen", "damit", "für", "bis"}
 
+_COLORS = {
+    "rot": 0, "orange": 30, "gelb": 60, "grün": 120, "gruen": 120, "türkis": 180, "tuerkis": 180,
+    "blau": 240, "lila": 270, "violett": 270, "pink": 330, "rosa": 330,
+}
+_WHITES = {"warmweiß": 2700, "warmweiss": 2700, "kaltweiß": 6500, "kaltweiss": 6500, "neutralweiß": 4000, "neutralweiss": 4000}
+_WINDOW = r"(?:das |die |den )?(?:fenster|fenstern)"
+_GATE = r"(?:das |die |den )?(?P<device>garagentor|garage|tor|tore|einfahrt)"
+_COLOR_WORD = "|".join(list(_COLORS) + list(_WHITES))
+
 PATTERNS: list[tuple[str, re.Pattern]] = [
     ("light", re.compile(rf"^{_VERB}(?P<all>alle |sämtliche )(?P<lightword>{_LIGHT})(?: {_PREP} {_ROOM})? (?:bitte )?{_STATE}{_END}$")),
     ("light", re.compile(rf"^{_VERB}(?P<lightword>{_LIGHT}) (?P<everywhere>überall|im ganzen haus) (?:bitte )?{_STATE}{_END}$")),
@@ -70,6 +78,19 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     ("shade", re.compile(rf"^{_MOVE}{_PREP} {_ROOM} {_SHADE} {_SHADE_STATE}{_END}$")),
     ("light", re.compile(r"^(?:please )?turn (?P<state>on|off) (?:the )?lights?(?: in (?:the )?(?P<room>[a-z][a-z\- ]{1,40}?))?(?: please)?$")),
     ("light", re.compile(r"^(?:please )?turn (?:the )?lights?(?: in (?:the )?(?P<room>[a-z][a-z\- ]{1,40}?))? (?P<state>on|off)(?: please)?$")),
+    ("status", re.compile(rf"^(?:ist|sind) {_LIGHT}(?: {_PREP} {_ROOM})? (?:gerade )?(?P<state>an|aus|ein)$")),
+    ("status", re.compile(rf"^(?:ist|sind) {_WINDOW}(?: {_PREP} {_ROOM})? (?:gerade )?(?P<state>offen|auf|zu|geschlossen)$")),
+    ("status", re.compile(rf"^(?:ist|sind) {_SHADE}(?: {_PREP} {_ROOM})? (?:gerade )?(?P<state>oben|unten|auf|zu|offen|geschlossen)$")),
+    ("status", re.compile(rf"^(?:ist jemand|ist wer)(?: {_PREP} {_ROOM}| da| zuhause| zu hause)?$")),
+    ("status", re.compile(r"^(?:wie viel|wieviel) (?:strom|verbrauch|energie)(?: verbrauchen wir| ziehen wir| haben wir)?$")),
+    ("music", re.compile(r"^(?:etwas |ein bisschen )?(?P<music>lauter|leiser)(?: machen)?$")),
+    ("music", re.compile(r"^(?:mach |schalte )?(?:bitte )?(?:die |das )?musik (?P<music>aus|an|pause|weiter|lauter|leiser|stopp)$")),
+    ("music", re.compile(r"^(?:musik )?(?P<music>pause|pausieren|weiter)$")),
+    ("music", re.compile(r"^(?:nächstes|nächster) (?:lied|titel|song)$")),
+    ("music", re.compile(r"^(?:vorheriges|vorheriger|letztes) (?:lied|titel|song)$")),
+    ("music", re.compile(rf"^(?:lautstärke|musik lautstärke) auf {_VALUE}$")),
+    ("music", re.compile(rf"^(?:spiel|spiele) (?:bitte )?(?:den |die )?(?:favoriten|favorit) (?P<fav>[a-zäöüß0-9][a-zäöüß0-9\- ]{{1,40}}?)(?: {_PREP} {_ROOM})?$")),
+    ("music", re.compile(rf"^(?:spiel|spiele) (?:bitte )?(?:mal )?(?:etwas )?(?P<query>[a-zäöüß0-9][a-zäöüß0-9\- ]{{1,40}}?)(?: {_PREP} {_ROOM})?$")),
     ("named", re.compile(rf"^{_VERB}{_DEVICE}(?: {_PREP} {_ROOM})?{_SPOT} (?:bitte )?{_STATE}{_END}$")),
     ("named", re.compile(rf"^{_VERB}{_PREP} {_ROOM} {_DEVICE}{_SPOT} {_STATE}{_END}$")),
     ("temp", re.compile(rf"^(?:wie warm|wie kalt|welche temperatur|wie viel grad|wieviel grad)(?: ist es| hat es| haben wir| herrscht)?(?: {_PREP} {_ROOM}| (?P<outside>draußen|draussen|außen|aussen|im freien))?{_END}$")),
@@ -85,12 +106,48 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     ("time", re.compile(r"^(?:what time is it|what's the time|what is the time)(?: please)?$")),
     ("date", re.compile(r"^(?:welcher tag ist heute|welches datum (?:haben wir|ist heute)|der wievielte ist heute|was ist heute für ein tag)$")),
     ("date", re.compile(r"^(?:what day is it|what's the date|what is the date)(?: today)?$")),
+    ("climate", re.compile(rf"^(?:stell|stelle|mach|heiz|heize)(?: bitte)? (?:die |das )?(?:heizung|temperatur)(?: {_PREP} {_ROOM})? auf (?P<value>\d{{1,2}}(?:[.,]\d)?) ?grad{_END}$")),
+    ("climate", re.compile(rf"^(?:heizung|temperatur)(?: {_PREP} {_ROOM})? auf (?P<value>\d{{1,2}}(?:[.,]\d)?) ?grad{_END}$")),
+    ("climate", re.compile(rf"^(?:stell|stelle|schalte)(?: bitte)? (?:die )?heizung(?: {_PREP} {_ROOM})? auf (?P<mode>automatik|auto|heizen|kühlen|kuehlen|manuell){_END}$")),
+    ("window", re.compile(rf"^(?P<state>öffne|oeffne|schließe|schliesse|schließ|schliess)(?: mal)? (?:bitte )?{_WINDOW}(?: {_PREP} {_ROOM})?{_END}$")),
+    ("window", re.compile(rf"^(?:mach|mache|öffne|oeffne|schließe|schliesse|schließ|schliess|fahr|fahre)(?: mal)? (?:bitte )?{_WINDOW}(?: {_PREP} {_ROOM})? (?P<state>auf|zu|öffnen|oeffnen|schließen|schliessen|stopp|anhalten){_END}$")),
+    ("window", re.compile(rf"^{_WINDOW}(?: {_PREP} {_ROOM})? (?P<state>auf|zu|öffnen|schließen|schliessen|stopp|anhalten|kippen){_END}$")),
+    ("window", re.compile(rf"^(?:mach|fahr)(?: mal)? (?:bitte )?{_WINDOW}(?: {_PREP} {_ROOM})? auf {_VALUE}{_END}$")),
+    ("window", re.compile(rf"^{_WINDOW}(?: {_PREP} {_ROOM})? auf {_VALUE}{_END}$")),
+    ("slat", re.compile(rf"^(?:fahr|stell|mach)(?: mal)? (?:bitte )?(?:die )?lamellen(?: {_PREP} {_ROOM})? auf {_VALUE}{_END}$")),
+    ("slat", re.compile(rf"^(?:fahr|stell|mach)(?: mal)? (?:bitte )?(?:die )?lamellen(?: {_PREP} {_ROOM})? (?P<state>auf|zu|offen){_END}$")),
+    ("color", re.compile(rf"^{_VERB}{_LIGHT}(?: {_PREP} {_ROOM})? (?P<color>{_COLOR_WORD}){_END}$")),
+    ("gate", re.compile(rf"^(?:mach|mache|öffne|oeffne|schließe|schliesse|schließ|schliess|fahr)(?: mal)? (?:bitte )?{_GATE} (?P<state>auf|zu|öffnen|oeffnen|schließen|schliessen|stopp){_END}$")),
+    ("alarm", re.compile(r"^(?:mach |schalte )?(?:bitte )?(?:den |die )?alarm (?P<state>scharf|unscharf|an|aus)$")),
+    ("music", re.compile(r"^(?:etwas |ein bisschen )?(?P<music>lauter|leiser)(?: machen)?$")),
+    ("music", re.compile(r"^(?:mach |schalte )?(?:bitte )?(?:die |das )?musik (?P<music>aus|an|pause|weiter|lauter|leiser|stopp)$")),
+    ("music", re.compile(r"^(?:musik )?(?P<music>pause|pausieren|weiter)$")),
+    ("music", re.compile(r"^(?:nächstes|nächster|nächster) (?:lied|titel|song)$")),
+    ("music", re.compile(r"^(?:vorheriges|vorheriger|letztes) (?:lied|titel|song)$")),
+    ("music", re.compile(rf"^(?:lautstärke|musik lautstärke) auf {_VALUE}$")),
+    ("music", re.compile(rf"^(?:spiel|spiele) (?:bitte )?(?:den |die )?(?:favoriten|favorit) (?P<fav>[a-zäöüß0-9][a-zäöüß0-9\- ]{{1,40}}?)(?: {_PREP} {_ROOM})?$")),
+    ("music", re.compile(rf"^(?:spiel|spiele) (?:bitte )?(?:mal )?(?:etwas )?(?P<query>[a-zäöüß0-9][a-zäöüß0-9\- ]{{1,40}}?)(?: {_PREP} {_ROOM})?$")),
 ]
 
 _WAKE = re.compile(rf"^(?:(?:hey|hallo|ok|okay) )?{WAKE_WORD}\b ?")
 _ON = {"an", "ein", "anschalten", "einschalten", "anmachen", "hell", "on"}
 _UP = {"hoch", "rauf", "auf", "ganz auf", "öffnen"}
-_DEVICE_KINDS = {"light": "light", "dim": "light", "shade": "shading", "kind": "light", "named": "light", "mood": "light"}
+_DEVICE_KINDS = {
+    "light": "light",
+    "dim": "light",
+    "shade": "shading",
+    "kind": "light",
+    "named": "light",
+    "mood": "light",
+    "window": "window",
+    "slat": "shading",
+    "climate": "climate",
+    "color": "light",
+    "white": "light",
+    "gate": "gate",
+    "alarm": "alarm",
+}
+_CLIMATE_MODES = {"automatik": 0, "auto": 0, "heizen": 1, "kühlen": 2, "kuehlen": 2, "manuell": 3}
 _STOP = {"das", "die", "den", "der", "dem", "im", "in", "am", "an", "beim", "bei", "über", "neben", "hinter", "mal", "bitte"}
 _WEAK = {"licht", "lichter", "beleuchtung", "lampe", "lampen", "leuchte"}
 _SYNONYMS = {"fernseher": "tv", "fernsehen": "tv", "fernseh": "tv", "glotze": "tv", "esstisch": "tisch", "couch": "sofa"}
@@ -111,6 +168,7 @@ class QuickCommand:
     reason: str | None = None
     clock: str | None = None
     scope: str | None = None  # all = every light in the room, house = every light
+    value2: int | None = None
 
 
 def _norm(text: str) -> str:
@@ -131,6 +189,13 @@ def parse(text: str) -> QuickCommand | None:
     if " und " in sentence and not re.search(r"\b(?:timer|wecker|erinner)", sentence):
         return None
     found = _parse_sentence(sentence)
+    if found is None:
+        mood = re.match(
+            rf"^(?:mach |mache |schalte |starte )?(?:bitte )?(?:mal )?(?P<mood>gute nacht|gemütlich|fernsehen|entspannen|lesen|kino)(?: {_PREP} {_ROOM})?$",
+            sentence,
+        )
+        if mood:
+            found = QuickCommand("scene", (mood.groupdict().get("room") or "").strip() or None, mood.groupdict().get("prep"), "mood", scene=mood.group("mood"))
     if found is None:
         first, _, rest = sentence.partition(" ")
         verb = closest(first, _COMMAND_VERBS) if rest else None
@@ -176,6 +241,87 @@ def _parse_sentence(sentence: str) -> QuickCommand | None:
             else:
                 value = 50
             return QuickCommand("position", room, groups.get("prep"), "shade", value)
+        if kind == "climate":
+            if groups.get("mode"):
+                return QuickCommand("mode", room, groups.get("prep"), "climate", _CLIMATE_MODES[groups["mode"]], scene=groups["mode"])
+            number = word_number(groups["value"].replace(",", "."))
+            if number is None:
+                return None
+            return QuickCommand("temperature", room, groups.get("prep"), "climate", value=number)
+        if kind == "window":
+            state = groups.get("state") or ""
+            if groups.get("value"):
+                number = word_number(groups["value"])
+                if number is None or not 0 <= int(number) <= 100:
+                    return None
+                return QuickCommand("position", room, groups.get("prep"), "window", int(number))
+            if state == "kippen":
+                return QuickCommand("position", room, groups.get("prep"), "window", 12, scene="gekippt")
+            if state in {"zu", "schließen", "schliessen"} or state.startswith("schließ") or state.startswith("schlies"):
+                return QuickCommand("close", room, groups.get("prep"), "window")
+            if state in {"stopp", "anhalten"}:
+                return QuickCommand("stop", room, groups.get("prep"), "window")
+            return QuickCommand("open", room, groups.get("prep"), "window")
+        if kind == "slat":
+            if groups.get("value"):
+                number = word_number(groups["value"])
+                if number is None or not 0 <= int(number) <= 100:
+                    return None
+                value = int(number)
+            else:
+                value = 0 if groups.get("state") in {"auf", "offen"} else 100
+            return QuickCommand("slat", room, groups.get("prep"), "slat", value)
+        if kind == "color":
+            color = groups["color"]
+            if color in _WHITES:
+                return QuickCommand("white", room, groups.get("prep"), "white", _WHITES[color], scene=color)
+            return QuickCommand("color", room, groups.get("prep"), "color", _COLORS[color], scene=color)
+        if kind == "gate":
+            state = groups["state"]
+            action = "close" if state in {"zu", "schließen", "schliessen"} else "stop" if state == "stopp" else "open"
+            return QuickCommand(action, room, groups.get("prep"), "gate", device=groups.get("device"))
+        if kind == "alarm":
+            state = groups["state"]
+            return QuickCommand("disarm" if state in {"aus", "unscharf"} else "arm", None, None, "alarm")
+        if kind == "status":
+            if groups.get("state") and "fenster" in sentence:
+                topic = "window"
+            elif groups.get("state") and re.search(r"rollo|jalousie|beschattung|raffstore", sentence):
+                topic = "shade"
+            elif "jemand" in sentence or "wer" in sentence:
+                topic = "presence"
+            elif "strom" in sentence or "verbrauch" in sentence or "energie" in sentence:
+                topic = "power"
+            else:
+                topic = "light"
+            return QuickCommand("read", room, groups.get("prep"), "status", device=topic)
+        if kind == "music":
+            if groups.get("value"):
+                number = word_number(groups["value"])
+                if number is None or not 0 <= int(number) <= 100:
+                    return None
+                return QuickCommand("volume", room, groups.get("prep"), "music", int(number))
+            if groups.get("fav"):
+                return QuickCommand("favorite", room, groups.get("prep"), "music", scene=groups["fav"].strip())
+            if groups.get("query"):
+                query = groups["query"].strip()
+                if re.search(r"\b(?:licht|lampe|rollo|fenster|tor|heizung|alarm)\b", query):
+                    return None
+                return QuickCommand("search", room, groups.get("prep"), "music", scene=query)
+            word = (groups.get("music") or "").strip()
+            if not word and "nächst" in sentence:
+                word = "next"
+            if not word and "vorher" in sentence or sentence.startswith("letztes"):
+                word = "previous"
+            mapping = {
+                "aus": "pause", "pause": "pause", "pausieren": "pause", "stopp": "pause",
+                "an": "play", "weiter": "play", "lauter": "louder", "leiser": "quieter",
+                "next": "next", "previous": "previous",
+            }
+            action = mapping.get(word)
+            if action is None:
+                return None
+            return QuickCommand(action, room, groups.get("prep"), "music")
         if kind == "dim":
             number = word_number(groups["value"])
             if number is None or number != int(number):
@@ -260,6 +406,26 @@ def _clear_match(query: list[str], entry: "Entry") -> bool:
     return all(any(_match(w, t) for t in strong) for w in names)
 
 
+def _safety_targets(house: "House", area: "Area", command: QuickCommand, group: str) -> tuple[list["Entry"], str | None]:
+    """Garage, gate and alarm stay out of the normal light filter. They still need a spoken yes."""
+    pool = [
+        e
+        for e in house.catalog.entries(only_allowed=True)
+        if e.group == group and command.action in ACTIONS.get(e.type, ())
+    ]
+    if command.device:
+        query = _tokens(command.device)
+        pool = [e for e in pool if _score(query, e) >= 1.0]
+    elif command.room is not None:
+        pool, _, resolved = _in_room(house, area, command, pool)
+        if not resolved:
+            pool = []
+    else:
+        local = [e for e in pool if e.room in area.rooms]
+        pool = local or (pool if len(pool) == 1 else [])
+    return (pool, pool[0].room if pool else None)
+
+
 def _in_room(house: "House", area: "Area", command: QuickCommand, candidates: list["Entry"]) -> tuple[list["Entry"], str | None, bool]:
     """Candidates in the named room (or the Bereich), the room label and whether a room was resolved."""
     if command.room is None:
@@ -279,6 +445,8 @@ def targets(house: "House", area: "Area", command: QuickCommand) -> tuple[list["
     group = _DEVICE_KINDS.get(command.kind)
     if group is None:
         return [], None
+    if command.kind in ("gate", "alarm"):
+        return _safety_targets(house, area, command, group)
     action = command.action
     candidates = [
         e
@@ -357,7 +525,7 @@ def targets(house: "House", area: "Area", command: QuickCommand) -> tuple[list["
                 main = house.catalog.get(named.main_light) if group == "light" and named.main_light else None
                 hits = [main] if main is not None and main in candidates else [e for e in candidates if e.room in named.rooms]
                 room_label = named.name
-    if group == "shading":
+    if group in ("shading", "window", "climate"):
         return hits, room_label
     controllers = [e for e in hits if e.type == "LightControllerV2"]
     chosen = controllers or hits
@@ -464,6 +632,46 @@ def temperature_reply(house: "House", area: "Area", command: QuickCommand, lang:
     return book.pick("temperature", lang, raum=label or "", anrede=anrede, wert=wert)
 
 
+def status_reply(house: "House", area: "Area", command: QuickCommand, lang: str, anrede: str | None, book: "PhraseBook") -> str | None:
+    """A reading from the Miniserver. None when the house has no such device."""
+    catalog = house.catalog
+    state = house.miniserver.state
+    topic = command.device
+
+    def place(pool: list["Entry"]) -> list["Entry"]:
+        if command.room is not None:
+            found, _, resolved = _in_room(house, area, command, pool)
+            return found if resolved else []
+        local = [e for e in pool if e.room in area.rooms]
+        return local or pool
+
+    if topic == "power":
+        meters = place([e for e in catalog.entries(only_allowed=True) if e.type == "Meter"])
+        parts = [f"{e.name}: {catalog.describe_state(e, state)}" for e in meters if catalog.describe_state(e, state)]
+        if not parts:
+            return None
+        wert = "; ".join(parts)
+    elif topic == "presence":
+        people = place([e for e in catalog.entries(only_allowed=True) if e.type == "PresenceDetector"])
+        if not people:
+            return None
+        wert = ", ".join(f"{e.name}: {catalog.describe_state(e, state) or 'unbekannt'}" for e in people)
+    elif topic == "window":
+        monitors = place([e for e in catalog.entries(only_allowed=True) if e.type == "WindowMonitor"])
+        windows = place([e for e in catalog.entries(only_allowed=True) if e.type == "Window"])
+        chosen = monitors or windows
+        if not chosen:
+            return None
+        wert = ", ".join(f"{e.name}: {catalog.describe_state(e, state) or 'unbekannt'}" for e in chosen)
+    else:
+        probe = QuickCommand("up" if topic == "shade" else "on", command.room, command.prep, "shade" if topic == "shade" else "light")
+        found, _ = targets(house, area, probe)
+        if not found:
+            return None
+        wert = ", ".join(f"{e.name}: {catalog.describe_state(e, state) or 'unbekannt'}" for e in found)
+    return book.pick("state", lang, anrede=anrede, wert=wert, raum="")
+
+
 def clock_reply(command: QuickCommand, now: datetime, lang: str, anrede: str | None, book: "PhraseBook") -> str:
     if lang == "en":
         uhrzeit = f"{now:%H:%M}"
@@ -487,6 +695,15 @@ INTENT = {
     ("shade", "down"): "shade_down",
     ("shade", "stop"): "shade_stop",
     ("shade", "position"): "shade_set",
+    ("window", "open"): "window",
+    ("window", "close"): "window",
+    ("window", "stop"): "window",
+    ("window", "position"): "window",
+    ("slat", "slat"): "slat",
+    ("climate", "temperature"): "climate",
+    ("climate", "mode"): "climate",
+    ("color", "color"): "color",
+    ("white", "white"): "color",
 }
 
 
@@ -494,5 +711,20 @@ def reply(command: QuickCommand, room_label: str | None, lang: str, anrede: str 
     if not ok:
         return book.pick("failed", lang, anrede=anrede)
     intent = INTENT[(command.kind, command.action)]
-    wert = command.scene if command.kind == "mood" else (command.value or "")
+    if command.kind == "mood":
+        wert = command.scene or ""
+    elif command.kind == "climate" and command.action == "temperature":
+        wert = f"{float(command.value):g} Grad" if lang != "en" else f"{float(command.value):g} degrees"
+    elif command.kind == "climate":
+        wert = {"automatik": "Automatik", "auto": "Automatik", "heizen": "Heizen", "kühlen": "Kühlen", "kuehlen": "Kühlen", "manuell": "Manuell"}.get(command.scene or "", command.scene or "")
+    elif command.kind == "window" and command.action == "open":
+        wert = "auf"
+    elif command.kind == "window" and command.action == "close":
+        wert = "zu"
+    elif command.kind == "window" and command.action == "stop":
+        wert = "an"
+    elif command.kind in ("color", "white"):
+        wert = command.scene or command.value or ""
+    else:
+        wert = command.scene if command.scene else (command.value or "")
     return book.pick(intent, lang, raum=_anrede_and_place(command, room_label, lang), anrede=anrede, wert=wert)

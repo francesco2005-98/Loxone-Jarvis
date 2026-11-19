@@ -201,6 +201,25 @@ def test_kroko_wording_is_understood():
     assert quick.parse("Rollos halb zu").value == 50
     assert quick.parse("Mach das Licht im Esszimmer gemütlich") is None
     assert quick.parse("Mach die Steckdose an").kind == "named"
+    assert quick.parse("Ist das Licht im Bad an").kind == "status" and quick.parse("Ist das Licht im Bad an").device == "light"
+    assert quick.parse("Sind die Fenster offen").device == "window"
+    assert quick.parse("Wie viel Strom verbrauchen wir").device == "power"
+    assert quick.parse("Ist jemand im Wohnzimmer").device == "presence"
+    assert quick.parse("Stell die Heizung im Bad auf 21 Grad").action == "temperature" and quick.parse("Stell die Heizung im Bad auf 21 Grad").value == 21
+    assert quick.parse("Stell die Heizung auf Heizen").action == "mode"
+    assert quick.parse("Mach das Fenster im Schlafzimmer auf").action == "open"
+    assert quick.parse("Schließ das Fenster").action == "close"
+    assert quick.parse("Fahr die Lamellen auf 30 Prozent").action == "slat" and quick.parse("Fahr die Lamellen auf 30 Prozent").value == 30
+    assert quick.parse("Mach das Licht blau").action == "color" and quick.parse("Mach das Licht blau").scene == "blau"
+    assert quick.parse("Mach das Licht warmweiß").action == "white"
+    assert quick.parse("Mach das Garagentor auf").kind == "gate" and quick.parse("Mach das Garagentor auf").action == "open"
+    assert quick.parse("Alarm scharf").action == "arm"
+    assert quick.parse("Musik aus").action == "pause"
+    assert quick.parse("Lauter").action == "louder"
+    assert quick.parse("Spiel Jazz im Wohnzimmer").action == "search" and quick.parse("Spiel Jazz im Wohnzimmer").scene == "jazz"
+    assert quick.parse("Spiel den Favoriten Abend").action == "favorite"
+    assert quick.parse("Gute Nacht").kind == "mood" and quick.parse("Gute Nacht").scene == "gute nacht"
+    assert quick.parse("Mach gemütlich im Wohnzimmer").scene == "gemütlich"
 
 
 def test_rgb_scene_state_is_shown(home):

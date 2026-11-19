@@ -280,6 +280,26 @@ def test_flash_keeps_voice_turns_on_minimal_thinking(setup):
     assert house.brain._thinking().thinking_level.name == "HIGH"
 
 
+def test_gate_asks_locally_and_waits_for_yes(setup):
+    house, area, dimmer, gate, sent = setup
+    house.brain._genai = lambda: (_ for _ in ()).throw(AssertionError("Gemini must not be asked"))
+    session = AreaSession(area.id)
+    reply, _ = run(house.coordinator.handle_text(session, area, "Mach das Garagentor auf", "de", None))
+    assert sent == []
+    assert session.pending is not None
+    assert "Garagentor" in reply and "öffnen" in reply
+    reply, _ = run(house.coordinator.handle_text(session, area, "Ja", "de", None))
+    assert sent == [(gate.uuid, "open")]
+    assert "Sir" in reply or reply
+
+
+def test_a_state_question_is_read_locally(setup):
+    house, area, *_ = setup
+    house.brain._genai = lambda: (_ for _ in ()).throw(AssertionError("Gemini must not be asked"))
+    reply, _ = run(house.coordinator.handle_text(AreaSession(area.id), area, "Ist das Licht an?", "de", None))
+    assert "Deckenlicht" in reply and "aus" in reply.lower()
+
+
 def test_plain_light_command_switches_without_gemini(setup):
     house, area, dimmer, gate, sent = setup
     house.brain._genai = lambda: (_ for _ in ()).throw(AssertionError("Gemini must not be asked"))
