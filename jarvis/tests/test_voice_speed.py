@@ -67,7 +67,7 @@ class _Client(AudioserverClient):
         if self.missing:
             self.missing = False
             raise AudioserverError("file not found")
-        if getattr(self, "reject_slash", False) and "#" not in cmd:
+        if getattr(self, "reject_hash", False) and "#" in cmd:
             return False
         return True
 
@@ -99,18 +99,18 @@ def test_a_file_the_server_lost_is_uploaded_again():
     assert len(client.uploads) == 2
 
 
-def test_the_announcement_names_the_player_and_the_volume_separately():
+def test_the_announcement_uses_the_player_volume_form_the_server_plays():
     client = _Client()
 
     async def go():
         await client.announce([(4, 35)], b"RIFF-wohn")
-        client.reject_slash = True
+        client.reject_hash = True
         client._announcements.clear()
         await client.announce([(4, 35)], b"RIFF-ess")
 
     asyncio.run(go())
-    assert client.plays[0].endswith("/4/35") and "#" not in client.plays[0]
-    assert any(cmd.endswith("/4#35") for cmd in client.plays)
+    assert client.plays[0].endswith("/4#35")
+    assert any(cmd.endswith("/4/35") and "#" not in cmd for cmd in client.plays)
 
 
 def test_the_same_words_playing_twice_at_once_get_their_own_file():

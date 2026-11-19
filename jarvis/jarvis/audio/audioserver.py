@@ -178,7 +178,7 @@ class AudioserverClient:
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=10)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             ws = await http.ws_connect(
-                f"ws://{host}:{PORT}/", protocols=("remotecontrol",), heartbeat=30, max_msg_size=0
+                f"ws://{host}:{PORT}/", protocols=("remotecontrol",), heartbeat=None, max_msg_size=0
             )
             self._ws = ws
             try:
@@ -381,7 +381,9 @@ class AudioserverClient:
         stale = self._http_used > 0 and time.monotonic() - self._http_used > HTTP_IDLE_S
         if self._http is None or self._http.closed or stale:
             old = self._http
-            timeout = aiohttp.ClientTimeout(total=8, connect=3, sock_connect=3, sock_read=5)
+            # The Audioserver can take several seconds to accept a file. A short
+            # read timeout aborts that and the announcement never starts.
+            timeout = aiohttp.ClientTimeout(total=20, sock_connect=5, sock_read=20)
             self._http = aiohttp.ClientSession(timeout=timeout)
             self._http_used = 0.0
             if old is not None and not old.closed:
@@ -419,15 +421,14 @@ class AudioserverClient:
     async def _play(self, filename: str, targets: list[tuple[int, int]]) -> None:
         async def one(player: int, volume: int) -> None:
             volume = max(1, min(100, int(volume)))
-            # The current app addresses the player and the volume as separate path
-            # segments. The older "player#volume" form is only a fallback: on some
-            # servers the hash is not a player id, and the file then starts in the
-            # first zone.
-            command = f"audio/grouped/playuploadedfile/{filename}/{player}/{volume}"
+            # Firmware 17.2/17.3 starts the file only for "player#volume". The slash
+            # form "player/volume" is answered with true and then plays nothing,
+            # so it is only the fallback when the hash form is refused.
+            command = f"audio/grouped/playuploadedfile/{filename}/{player}#{volume}"
             result = await self._command(command, "playuploadedfile_result")
             if result is not True:
                 result = await self._command(
-                    f"audio/grouped/playuploadedfile/{filename}/{player}#{volume}", "playuploadedfile_result"
+                    f"audio/grouped/playuploadedfile/{filename}/{player}/{volume}", "playuploadedfile_result"
                 )
             if result is not True:
                 raise AudioserverError(f"Ansage in Zone {player} nicht bestätigt")
