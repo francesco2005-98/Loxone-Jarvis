@@ -13,8 +13,9 @@ import numpy as np
 SAMPLE_RATE = 16000
 FRAME_MS = 30
 FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
-# Once someone talks, softer syllables a few dB under the start threshold still count as speech.
-HOLD_DB = 4.0
+# Once someone talks, softer syllables well under the start threshold still count as speech.
+# A tight hold treated the end of a quiet word as silence and cut the sentence off.
+HOLD_DB = 8.0
 
 
 def frame_dbfs(frame: bytes) -> float:
@@ -127,8 +128,20 @@ class Endpointer:
         return "continue"
 
 
+def _db(samples: np.ndarray) -> float:
+    power = float(np.mean(samples * samples)) if samples.size else 0.0
+    if power <= 1e-9:
+        return -120.0
+    return 10.0 * np.log10(power / (32768.0**2))
+
+
 def high_pass(pcm: bytes, level: int) -> bytes:
-    """Remove rumble and apply a soft noise gate before recognition."""
+    """Remove rumble. Duck only frames far below this recording's own voice.
+
+    An absolute gate ate quiet consonants, so the same sentence was clear one
+    time and missing the next. A recording that is quiet all the way through
+    is left whole and turned up later.
+    """
     if level <= 0 or len(pcm) < 4:
         return pcm
     x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float32)
@@ -138,11 +151,12 @@ def high_pass(pcm: bytes, level: int) -> bytes:
     y[1:] = x[1:] - alpha * x[:-1]
     y = 0.6 * y + 0.4 * x
     frame = 480
-    gate_db = -62.0 + 3.0 * level
-    for start in range(0, y.size, frame):
-        seg = y[start : start + frame]
-        power = float(np.mean(seg * seg)) if seg.size else 0.0
-        db = 10.0 * np.log10(power / (32768.0**2)) if power > 1e-9 else -120.0
-        if db < gate_db:
-            y[start : start + frame] = seg * 0.2
+    levels = [_db(y[start : start + frame]) for start in range(0, y.size, frame)]
+    speech = float(np.percentile(levels, 90)) if levels else -120.0
+    if speech < -46.0:
+        return np.clip(y, -32768, 32767).astype("<i2").tobytes()
+    gate_db = min(speech - (12.0 + level), -40.0)
+    for index, start in enumerate(range(0, y.size, frame)):
+        if levels[index] < gate_db:
+            y[start : start + frame] *= 0.45
     return np.clip(y, -32768, 32767).astype("<i2").tobytes()

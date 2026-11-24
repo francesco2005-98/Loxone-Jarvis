@@ -156,7 +156,9 @@ def closest(word: str, candidates: tuple[str, ...], limit: int = 2) -> str | Non
 
 
 def correct(text: str, house) -> str:
-    text = unicodedata.normalize("NFC", text)
+    from .stt import polish
+
+    text = polish(unicodedata.normalize("NFC", text))
     entries = _entries(house)
     if not entries:
         return text

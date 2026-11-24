@@ -443,7 +443,7 @@ class Coordinator:
                 await self._say_line(area, run, _missed(transcript.lang or "de"), transcript.lang or "de", "", stt_ms, started)
                 return
             woke, rest = split_wake(transcript.text)
-            spoken = rest if woke else transcript.text
+            spoken = correct(rest if woke else transcript.text, house)
             if woke and not has_words(rest):
                 # Just "Jarvis": keep the conversation and listen for the command.
                 await self._listen_for_command(area, run)
