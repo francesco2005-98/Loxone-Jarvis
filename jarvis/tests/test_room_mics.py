@@ -396,7 +396,7 @@ def test_a_silent_announcement_is_tried_once_more(house, monkeypatch):
     house.zone_of = lambda a: Zone()
     house.speech.render = render
     house.audioserver.announce = announce
-    house.audioserver.player_for = lambda zone: _done((5, None))
+    house.audioserver.player_for = lambda zone: _ready((5, None))
     house.audioserver.cut = cut
     assert asyncio.run(house.speech.say("Sehr wohl.", "de", [area])) is True
     assert len(calls) == 2
@@ -446,7 +446,7 @@ def test_listen_tries_a_second_time(house):
     assert mic.client.calls == 2
 
 
-def _done(value):
+def _ready(value):
     async def inner():
         return value
 
