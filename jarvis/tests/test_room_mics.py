@@ -368,6 +368,91 @@ class Server:
         self.played.append(player)
 
 
+def test_a_silent_announcement_is_tried_once_more(house, monkeypatch):
+    from jarvis.audio import speech as speech_mod
+
+    monkeypatch.setattr(speech_mod, "BEGIN_TIMEOUT", 0.05)
+    area = house.areas.create("Wohnen")
+    calls = []
+    cuts = []
+
+    class Zone:
+        details = {"playerid": 5}
+
+    async def render(text, lang, lead_ms=None):
+        return wav.Pcm(np.zeros(2400, dtype=np.int16), 24000)
+
+    async def announce(targets, data):
+        calls.append(targets)
+        found = Announcement(f"try-{len(calls)}.wav", {5})
+        if len(calls) == 2:
+            found.began.set()
+            found.finished.set()
+        return found
+
+    async def cut(target):
+        cuts.append(target.filename)
+
+    house.zone_of = lambda a: Zone()
+    house.speech.render = render
+    house.audioserver.announce = announce
+    house.audioserver.player_for = lambda zone: _done((5, None))
+    house.audioserver.cut = cut
+    assert asyncio.run(house.speech.say("Sehr wohl.", "de", [area])) is True
+    assert len(calls) == 2
+    assert cuts == ["try-1.wav"]
+
+
+def test_a_missed_miniserver_command_is_sent_again(house):
+    sent = []
+
+    async def request(cmd, timeout=15):
+        sent.append(cmd)
+        if len(sent) == 1:
+            raise TimeoutError("keine Antwort")
+        return '{"LL": {"control": "", "value": "1", "Code": "200"}}'
+
+    server = house.miniserver
+    server.status = "verbunden"
+    server._ws = type("Socket", (), {"closed": False})()
+    server._request = request
+
+    def reconnect():
+        server.status = "verbunden"
+
+    server.reconnect = reconnect
+    reply = asyncio.run(server.command("uuid", "on"))
+    assert reply.ok
+    assert len(sent) == 2
+    assert sent[1].endswith("/uuid/on")
+
+
+def test_listen_tries_a_second_time(house):
+    mic = Mic("m1", "board", "Küche", "aa", "10.0.0.8", None, None, None)
+    mic.connected = True
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute_service(self, service, data):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("busy")
+
+    mic.client = Client()
+    mic.services = {"listen": object()}
+    assert asyncio.run(house.mics.listen(mic)) is True
+    assert mic.client.calls == 2
+
+
+def _done(value):
+    async def inner():
+        return value
+
+    return inner()
+
+
 def test_cutting_an_announcement_pauses_every_zone_and_resumes_music(house):
     servers = Audioservers(house.settings, house.miniserver, house.events)
     server = Server({1: True})

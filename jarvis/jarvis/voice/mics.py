@@ -337,8 +337,17 @@ class MicManager:
                     log.debug("sensitivity failed", exc_info=True)
 
     async def listen(self, mic: Mic) -> bool:
+        """Open the microphone for the next sentence. One quiet retry: the board sometimes misses the first call."""
+        for attempt in (1, 2):
+            if await self._listen_once(mic):
+                return True
+            if attempt == 1 and mic.connected:
+                await asyncio.sleep(0.3)
+        return False
+
+    async def _listen_once(self, mic: Mic) -> bool:
         service = mic.services.get("listen")
-        if not mic.connected or service is None:
+        if not mic.connected or service is None or mic.client is None:
             return False
         try:
             await mic.client.execute_service(service, {})

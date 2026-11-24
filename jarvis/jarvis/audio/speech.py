@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 UNMUTE_DELAY = 0.4
+BEGIN_TIMEOUT = 4.0
 
 
 class Speech:
@@ -98,29 +99,31 @@ class Speech:
                 targets.append((player, self._volume(area), host))
             for area in speaking:
                 coordinator.set_speaking(area.id, True, text)
-            started = time.monotonic()
-            announcement = await self.house.audioserver.announce(targets, wav.encode(pcm))
-            try:
-                if await _until(announcement.began, cut, 4.0):
-                    began = time.monotonic()
-                    self.last_start_latency = began - started
-                    self.last_voice_ms = int((began - render_started) * 1000)
-                    self.last_timing = {
-                        "tts": int((started - render_started) * 1000),
-                        "upload": announcement.upload_ms,
-                        "server": int((began - started) * 1000),
-                    }
-                    await _until(announcement.finished, cut, pcm.duration + 5.0)
-            except asyncio.TimeoutError:
-                remaining = pcm.duration + 1.0 - (time.monotonic() - started)
-                if remaining > 0:
-                    try:
-                        await asyncio.wait_for(cut.wait(), timeout=remaining)
-                    except asyncio.TimeoutError:
-                        pass
-            if cut.is_set() and not announcement.finished.is_set():
-                self.house.background(self.house.audioserver.cut(announcement), "cut announcement")
-            return True
+            encoded = wav.encode(pcm)
+            played = False
+            for attempt in (1, 2):
+                if cut.is_set():
+                    break
+                try:
+                    announcement = await self.house.audioserver.announce(targets, encoded)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("announcement failed: %s", exc)
+                    if attempt == 2:
+                        self.house.events.log("audio", "Ansage fehlgeschlagen", str(exc)[:200])
+                        return False
+                    self.house.events.log("audio", "Ansage wird wiederholt", str(exc)[:160])
+                    continue
+                started = time.monotonic()
+                heard = await self._wait_playback(announcement, cut, pcm, started, render_started)
+                if heard or cut.is_set():
+                    played = True
+                    break
+                await self.house.audioserver.cut(announcement)
+                if attempt == 1:
+                    self.house.events.log("audio", "Ansage hat nicht begonnen", "zweiter Versuch")
+            if not played:
+                self.house.events.log("audio", "Ansage hat nicht begonnen", "")
+            return played
         except Exception as exc:  # noqa: BLE001
             log.warning("announcement failed: %s", exc)
             self.house.events.log("audio", "Ansage fehlgeschlagen", str(exc)[:200])
@@ -135,6 +138,35 @@ class Speech:
                 coordinator.set_speaking(area.id, False)
             for lock in locks:
                 lock.release()
+
+    async def _wait_playback(self, announcement, cut: asyncio.Event, pcm: wav.Pcm, started: float, render_started: float) -> bool:
+        """True when the Audioserver started the file, or the speaker interrupted it."""
+        try:
+            if await _until(announcement.began, cut, BEGIN_TIMEOUT):
+                began = time.monotonic()
+                self.last_start_latency = began - started
+                self.last_voice_ms = int((began - render_started) * 1000)
+                self.last_timing = {
+                    "tts": int((started - render_started) * 1000),
+                    "upload": announcement.upload_ms,
+                    "server": int((began - started) * 1000),
+                }
+                await _until(announcement.finished, cut, pcm.duration + 5.0)
+                heard = True
+            else:
+                heard = cut.is_set()
+        except asyncio.TimeoutError:
+            heard = announcement.began.is_set()
+            if heard:
+                remaining = pcm.duration + 1.0 - (time.monotonic() - started)
+                if remaining > 0 and not cut.is_set():
+                    try:
+                        await asyncio.wait_for(cut.wait(), timeout=remaining)
+                    except asyncio.TimeoutError:
+                        pass
+        if cut.is_set() and not announcement.finished.is_set():
+            self.house.background(self.house.audioserver.cut(announcement), "cut announcement")
+        return heard
 
 
 async def _until(event: asyncio.Event, cut: asyncio.Event, timeout: float) -> bool:

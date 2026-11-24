@@ -92,6 +92,18 @@ class MiniserverClient:
         return self.values.get(state_uuid)
 
     async def command(self, uuid: str, cmd: str) -> p.Reply:
+        try:
+            return await self._command_now(uuid, cmd)
+        except (NotConnected, TimeoutError):
+            self.events.log("loxone", "Befehl wird wiederholt", "die Verbindung wird neu aufgebaut")
+            self.reconnect()
+            for _ in range(25):
+                await asyncio.sleep(0.2)
+                if self.connected:
+                    return await self._command_now(uuid, cmd)
+            raise NotConnected("Miniserver gerade nicht verbunden")
+
+    async def _command_now(self, uuid: str, cmd: str) -> p.Reply:
         if not self.connected or self._ws is None:
             raise NotConnected("Miniserver nicht verbunden")
         text = await self._request(f"jdev/sps/io/{uuid}/{cmd}")
