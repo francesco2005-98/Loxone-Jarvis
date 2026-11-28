@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from functools import lru_cache
 
 MIN_LENGTH = 4
 MAX_DISTANCE = 2
@@ -87,32 +88,36 @@ def _names(house) -> list[str]:
     return raw
 
 
-def _entries(house) -> list[tuple[str, str, str]]:
-    """(sound, folded, original spelling) for every name in the house."""
-    out: list[tuple[str, str, str]] = []
-    seen: set[str] = set()
-    for name in _names(house):
+@lru_cache(maxsize=1)
+def _index(names: tuple[str, ...]):
+    """Index the current catalogue once; a rename changes the cache key."""
+    by_length: dict[int, list[tuple[str, str]]] = {}
+    spellings: dict[str, str] = {}
+    for name in names:
         for word in _WORD.findall(unicodedata.normalize("NFC", name or "")):
             folded = _fold(word)
-            if len(folded) >= MIN_LENGTH and folded not in seen:
-                seen.add(folded)
-                out.append((_sound(word), folded, word))
-    return out
+            if len(folded) >= MIN_LENGTH and folded not in spellings:
+                spellings[folded] = word
+                sound = _sound(word)
+                by_length.setdefault(len(sound), []).append((sound, word))
+    return spellings, by_length
 
 
-def _fix_token(word: str, entries: list[tuple[str, str, str]]) -> str:
+def _fix_token(word: str, spellings: dict, by_length: dict) -> str:
     fold = _fold(word)
     if len(fold) < MIN_LENGTH or fold in _KEEP:
         return word
-    exact = [original for _, folded, original in entries if folded == fold]
-    if exact:
-        for original in exact:
-            if original == word:
-                return word
-        return exact[0]
+    if fold in spellings:
+        return spellings[fold]
     sound = _sound(word)
     limit = MAX_DISTANCE_LONG if len(sound) >= 9 else MAX_DISTANCE
-    ranked = sorted((_distance(sound, sounded, limit), original) for sounded, _, original in entries)
+    ranked = sorted(
+        (_distance(sound, sounded, limit), original)
+        for size in range(len(sound) - limit, len(sound) + limit + 1)
+        for sounded, original in by_length.get(size, ())
+    )
+    if not ranked:
+        return word
     best, second = ranked[0], ranked[1] if len(ranked) > 1 else None
     if best[0] > limit or best[0] / len(sound) >= 1 - MIN_SHARE:
         return word
@@ -124,16 +129,15 @@ def _fix_token(word: str, entries: list[tuple[str, str, str]]) -> str:
     return best[1]
 
 
-def _join(first: str, second: str, entries: list[tuple[str, str, str]]) -> str | None:
+def _join(first: str, second: str, spellings: dict, by_length: dict) -> str | None:
     """'Wohn Zimmer' -> 'Wohnzimmer' when that room exists and neither half is a name of its own."""
-    folds = {folded for _, folded, _ in entries}
-    if _fold(first) in folds or _fold(second) in folds:
+    if _fold(first) in spellings or _fold(second) in spellings:
         return None
     joined = first + second
     if len(_fold(joined)) < MIN_LENGTH:
         return None
-    fixed = _fix_token(joined, entries)
-    if fixed == joined or _fold(fixed) not in folds:
+    fixed = _fix_token(joined, spellings, by_length)
+    if _fold(fixed) not in spellings:
         return None
     # Only glue the two words when together they really are that name.
     if _distance(_sound(joined), _sound(fixed), 1) > 1:
@@ -160,8 +164,8 @@ def correct(text: str, house) -> str:
     from .stt import polish
 
     text = polish(unicodedata.normalize("NFC", text))
-    entries = _entries(house)
-    if not entries:
+    spellings, by_length = _index(tuple(_names(house)))
+    if not spellings:
         return text
     pieces = re.split(r"([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-]*)", text)
     index = 0
@@ -175,11 +179,12 @@ def correct(text: str, house) -> str:
         if (
             index + 2 < len(pieces)
             and _WORD.fullmatch(pieces[index + 2] or "")
-            and (joined := _join(piece, pieces[index + 2], entries))
+            and pieces[index + 1].isspace()
+            and (joined := _join(piece, pieces[index + 2], spellings, by_length))
         ):
             out.append(joined)
             index += 3
             continue
-        out.append(_fix_token(piece, entries))
+        out.append(_fix_token(piece, spellings, by_length))
         index += 1
     return "".join(out)

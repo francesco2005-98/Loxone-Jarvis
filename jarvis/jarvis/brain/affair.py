@@ -32,6 +32,7 @@ class Affair:
     person_id: str | None
     hint_spoken: bool = False
     executed: bool = False
+    executing: bool = False
     paused: bool = False
     asks_to_close: bool = False
     line: str = ""
@@ -81,12 +82,20 @@ def reaction(text: str) -> str:
     """What the words do to an open hint. Unclear stays with the conversation."""
     if _CANCEL.search(text or ""):
         return "cancel"
-    if _PAUSE.search(text or "") and not _ACK.search(text or ""):
+    if _PAUSE.search(text or ""):
         return "pause"
-    if _QUESTION.search(text or "") and not _ACK.search(text or ""):
+    if _QUESTION.search(text or ""):
         return "question"
-    if _ACK.search(text or ""):
+    if re.search(r"\b(?:weiß|weiss) (?:ich )?nicht\b", text or "", re.I):
+        return "unclear"
+    words = (text or "").strip(" .!,")
+    if _ACK.fullmatch(words) or re.fullmatch(
+        r"(?:die|sie|die tür) bleibt (?:heute )?offen|(?:ich weiß|ich weiss),? wir sitzen noch draußen",
+        words, re.I,
+    ):
         return "ack"
+    if re.fullmatch(r"(?:jetzt |bitte )?(?:weiter|fortsetzen|weitermachen|mach (?:jetzt )?weiter)", words, re.I):
+        return "resume"
     return "unclear"
 
 

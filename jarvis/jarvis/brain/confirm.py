@@ -43,8 +43,6 @@ def classify(text: str) -> Answer:
         return Answer.UNCLEAR
     if core in _YES:
         return Answer.YES
-    if core and core[0] == "ja" and len(core) <= 3:
-        return Answer.YES
-    if len(core) >= 2 and core[:2] == ("mach", "das") and len(core) <= 3:
+    if core in {("ja", "mach", "das"), ("ja", "mach", "es")}:
         return Answer.YES
     return Answer.UNCLEAR

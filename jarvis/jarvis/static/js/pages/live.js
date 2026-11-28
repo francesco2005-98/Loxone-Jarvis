@@ -257,7 +257,6 @@ export default function live(view, ctx) {
       stopPlayback();
     } else if (msg.type === "reply") {
       if (msg.audio) enqueue(msg.audio, true);
-      else ws.send(JSON.stringify({ type: "played" }));
     } else if (msg.type === "announce") {
       if (msg.audio) enqueue(msg.audio, false);
     }
@@ -282,8 +281,8 @@ export default function live(view, ctx) {
 
   function enqueue(b64, ack) {
     const gen = playGen;
-    playing = playing.catch(() => {}).then(() => play(b64, gen)).catch(() => {}).then(() => {
-      if (ack && gen === playGen && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "played" }));
+    playing = playing.catch(() => {}).then(() => play(b64, gen)).catch(() => false).then((heard) => {
+      if (ack && gen === playGen && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "played", heard: heard === true }));
     });
   }
 
@@ -318,6 +317,7 @@ export default function live(view, ctx) {
       });
       cancelAnimationFrame(raf);
       if (sourceNode === src) sourceNode = null;
+      return gen === playGen;
     } finally {
       if (gen === playGen) {
         muted = true;

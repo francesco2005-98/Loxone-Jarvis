@@ -28,6 +28,7 @@ class Pending:
     actions: list[tuple[Entry, str, Any, Any]] = field(default_factory=list)
     state: dict = field(default_factory=dict)
     lang: str = "de"
+    person_id: str | None = None
 
 
 @dataclass
@@ -53,6 +54,7 @@ class Turn:
     # While set, a scene of this name must not run through the control tool.
     hold_scene: str = ""
     release_scene: bool = False
+    search_sources: list[str] | None = None
 
 
 def _schema(properties: dict, required: list[str] | None = None) -> dict:
@@ -268,7 +270,7 @@ class ToolRunner:
             results.append(await self.execute(entry, action, item.get("value"), item.get("value2"), turn))
         if critical:
             question = ", ".join(f"{e.name}: {a}" for e, a, _, _ in critical)
-            turn.pending = Pending("control", question, critical, lang=turn.lang)
+            turn.pending = Pending("control", question, critical, lang=turn.lang, person_id=turn.person_id)
             results.append(
                 {
                     "status": "needs_confirmation",
@@ -299,7 +301,7 @@ class ToolRunner:
             actions.append((entry, action, item.get("value"), item.get("value2")))
         if not question or not actions:
             return None
-        return Pending("offer", question, actions, lang=turn.lang)
+        return Pending("offer", question, actions, lang=turn.lang, person_id=turn.person_id)
 
     async def execute(self, entry: Entry, action: str, value: Any, value2: Any, turn: Turn | None) -> dict:
         house = self.house

@@ -104,7 +104,7 @@ class ConfigAgent:
                         parts.append(types.Part.from_function_response(name=call.name, response={"confirmed": True}))
                         continue
                     summary = str(args.get("summary", "")).strip()
-                    turn.pending = Pending("config", summary, state=state, lang=turn.lang)
+                    turn.pending = Pending("config", summary, state=state, lang=turn.lang, person_id=turn.person_id)
                     return {
                         "status": "needs_confirmation",
                         "summary": summary,

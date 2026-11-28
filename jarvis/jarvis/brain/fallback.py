@@ -5,12 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_LIGHT = r"\b(licht|lichter|lampe|lampen|beleuchtung|light|lights|lamp)\b"
-_SHADE = r"\b(rollo|rollos|rollladen|rolladen|rollläden|jalousie|jalousien|beschattung|raffstore|blind|blinds|shutter|shutters)\b"
-_ON = r"\b(an|ein|einschalten|anmachen|on)\b"
-_OFF = r"\b(aus|ausschalten|ausmachen|off)\b"
-_UP = r"\b(auf|hoch|rauf|öffnen|oeffnen|up|open|raise)\b"
-_DOWN = r"\b(zu|runter|herunter|schließen|schliessen|down|close|lower)\b"
+from . import quick
 
 
 @dataclass(frozen=True)
@@ -19,27 +14,19 @@ class FallbackCommand:
     action: str  # "on" | "off" | "up" | "down"
 
 
-def _last(patterns: dict[str, str], text: str) -> str | None:
-    best: tuple[int, str] | None = None
-    for name, pattern in patterns.items():
-        for match in re.finditer(pattern, text):
-            if best is None or match.start() > best[0]:
-                best = (match.start(), name)
-    return best[1] if best else None
-
-
 def parse(text: str) -> FallbackCommand | None:
-    lowered = text.lower()
-    if re.search(_LIGHT, lowered):
-        action = _last({"on": _ON, "off": _OFF}, lowered)
-        if action:
-            return FallbackCommand("light", action)
-    if re.search(_SHADE, lowered):
-        action = _last({"up": _UP, "down": _DOWN}, lowered)
-        if action:
-            return FallbackCommand("shade", action)
+    """The offline path only controls the current room."""
+    if re.search(r"\b(?:nicht|kein\w*|außer|ausser|statt|not|except)\b|\?", text, re.I):
+        return None
+    command = quick.parse(text)
+    if command and command.room is None and command.scope is None:
+        if command.kind == "light" and command.action in ("on", "off"):
+            return FallbackCommand("light", command.action)
+        if command.kind == "shade" and command.action in ("up", "down"):
+            return FallbackCommand("shade", command.action)
+    if re.fullmatch(r"\s*(?:the )?lights? (on|off)[.! ]*", text, re.I):
+        return FallbackCommand("light", "on" if "on" in text.lower() else "off")
     return None
-
 
 def reply(command: FallbackCommand, lang: str, ok: bool) -> str:
     if not ok:

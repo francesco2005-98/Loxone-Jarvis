@@ -3,7 +3,7 @@ import { busy, card, clear, h, pageHead, pill, selectEl, timeAgo, toast, toggle 
 export default function ai(view, ctx) {
   const root = h("div", { class: "page" });
   view.append(root);
-  root.append(pageHead("Gemini deutet jeden Satz. Dein Haus bleibt bei dir."));
+  root.append(pageHead("Sprachmodell, lokale Hausbefehle und Sprachausgabe"));
 
   // --------------------------------------------------------------- gemini
   const statePill = h("span", {}, pill("Nicht geprüft", "dim"));
@@ -32,7 +32,7 @@ export default function ai(view, ctx) {
       h("div", { class: "label" }, "API-Schlüssel"),
       h("div", { class: "stack" }, keyState, h("div", { class: "row" }, keyInput, keySave)),
       h("div", { class: "label" }, "Modell"),
-      h("div", { class: "stack" }, modelSelect, h("div", { class: "hint" }, "Voreinstellung gemini-3.8-flash. Die Liste kommt direkt von Google.")),
+      h("div", { class: "stack" }, modelSelect, h("div", { class: "hint" }, "Der Verbindungstest prüft das gespeicherte Gemini-Modell.")),
       h("div", { class: "label" }, "System-Prompt"),
       h("div", { class: "stack" }, prompt, h("div", { class: "hint" }, "Persönlichkeit und Ton. Die Sicherheitsregeln hängt Jarvis immer selbst an.")),
     ),
@@ -89,6 +89,7 @@ export default function ai(view, ctx) {
   );
   const speculative = toggle(false, () => {});
   const quickToggle = toggle(false, () => {});
+  const quietLights = toggle(false, () => {});
   const earlyWake = toggle(false, () => {});
   const thinking = selectEl(
     [
@@ -111,10 +112,11 @@ export default function ai(view, ctx) {
       "div",
       { class: "kv" },
       ...row("Satzende nach", endSilence.row, "So lange Stille gilt als Satzende, Vorgabe 700 ms. Kürzer antwortet schneller, schneidet aber Sätze mit kurzen Denkpausen ab."),
-      ...row("Vorab-Erkennung", speculative, "Startet die Spracherkennung schon in der ersten kurzen Pause. Ist der Satz bis dahin ein vollständiger Sofortbefehl mit Raum oder Gerät, antwortet Jarvis sofort, ohne das Satzende abzuwarten. Spart rund 0,3 s."),
+      ...row("Vorab-Erkennung", speculative, "Bereitet das Transkript in Sprechpausen vor. Bei Schaltbefehlen wartet Jarvis auf das Satzende, damit du dich korrigieren kannst."),
       ...row("Nachfrage-Fenster", followup.row, "So lange hört Jarvis nach einer Antwort ohne erneutes „Jarvis“ zu."),
       ...row("Gespräch endet nach", conversation.row, "So lange nach dem letzten „Jarvis“ gehen Rückfragen ohne Aktivierungswort. Danach, und sobald ein Satz nicht an Jarvis gerichtet ist (Gespräch im Raum, Fernseher), muss er wieder mit „Jarvis“ geweckt werden. Der Gesprächsverlauf wird dann geleert."),
       ...row("Sofortantworten", quickToggle, "Licht, Lichtkreise, Stimmungen, Dimmen, Rollos, Uhrzeit und Datum ohne Gemini, in Jarvis' Persönlichkeit."),
+      ...row("Licht im Raum still schalten", quietLights, "Bei lokalen Sofortbefehlen am Raummikrofon genügt die sichtbare Änderung. Fehler werden angesagt."),
       ...row("Nachdenken von Gemini", thinking, "Weniger Nachdenken antwortet schneller, mehr hilft bei komplexen Fragen."),
       ...row("Vorschläge & Gegenfragen", suggestions, "Jarvis bietet passende Folgeaktionen an, etwa abends die Rollos zu den Lichtern. Ein einfaches „Ja“ genügt, ausgeführt wird sofort und lokal."),
       ...row("Abgelehnte Vorschläge merken", declineHours.row, "So lange schlägt Jarvis nach einem „Nein“ dasselbe nicht erneut vor."),
@@ -162,6 +164,7 @@ export default function ai(view, ctx) {
               "brain.decline_hours": Number(declineHours.input.value),
               "voice.speculative": speculative.querySelector("input").checked,
               "brain.quick": quickToggle.querySelector("input").checked,
+              "brain.quiet_lights": quietLights.querySelector("input").checked,
               "live.early_wake": earlyWake.querySelector("input").checked,
             },
           },
@@ -200,7 +203,6 @@ export default function ai(view, ctx) {
         await ctx.api("/secrets", { method: "PUT", body: { key: "gemini.api_key", value: keyInput.value } });
         keyInput.value = "";
         toast("Schlüssel gespeichert");
-        await loadModels();
         await load();
       } catch (e) {
         toast(e.message, "bad");
@@ -223,9 +225,14 @@ export default function ai(view, ctx) {
   testBtn.addEventListener("click", () =>
     busy(testBtn, async () => {
       testResult.textContent = "Prüfe …";
-      const res = await ctx.api("/ai/test", { method: "POST" });
-      statePill.replaceChildren(res.ok ? pill("Verbunden", "live") : pill("Fehler", "bad"));
-      testResult.textContent = res.ok ? `${res.model} antwortet in ${res.ms} ms.` : res.error;
+      try {
+        const res = await ctx.api("/ai/test", { method: "POST" });
+        statePill.replaceChildren(res.ok ? pill("Verbunden", "live") : pill("Fehler", "bad"));
+        testResult.textContent = res.ok ? `${res.model} antwortet in ${res.ms} ms.` : res.error;
+      } catch (error) {
+        statePill.replaceChildren(pill("Fehler", "bad"));
+        testResult.textContent = error.message;
+      }
     }),
   );
 
@@ -250,7 +257,8 @@ export default function ai(view, ctx) {
 
   async function loadModels() {
     const res = await ctx.api("/ai/models");
-    fill(modelSelect, res.models.map((m) => ({ value: m, label: m })), res.current);
+    const models = [...new Set([res.current, ...res.models].filter(Boolean))];
+    fill(modelSelect, models.map((m) => ({ value: m, label: m })), res.current);
     if (res.error) testResult.textContent = res.error;
   }
 
@@ -272,6 +280,7 @@ export default function ai(view, ctx) {
       declineHours.update();
       speculative.querySelector("input").checked = v["voice.speculative"];
       quickToggle.querySelector("input").checked = v["brain.quick"];
+      quietLights.querySelector("input").checked = v["brain.quiet_lights"];
       earlyWake.querySelector("input").checked = v["live.early_wake"];
       ctx.api("/phrases").then(renderPhrases).catch(() => {});
       speed.value = v["voice.speed"];

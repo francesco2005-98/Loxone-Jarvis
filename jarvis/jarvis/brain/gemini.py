@@ -53,6 +53,10 @@ SUGGEST_ASK = (
 class BrainUnavailable(RuntimeError):
     """Gemini could not be reached or refused the key. Triggers the offline sentences."""
 
+    def __init__(self, detail: str, status: int | None = None):
+        super().__init__(detail)
+        self.status = status
+
 
 class Brain:
     def __init__(self, house: "House"):
@@ -165,7 +169,7 @@ class Brain:
             response = await client.aio.models.generate_content(model=self.model, contents=contents, config=config)
         except errors.APIError as exc:
             self.last_error = f"{exc.code}: {exc.message}"[:200]
-            raise BrainUnavailable(self.last_error) from exc
+            raise BrainUnavailable(self.last_error, exc.code) from exc
         except (asyncio.TimeoutError, OSError) as exc:
             self.last_error = f"{type(exc).__name__}: {exc}"[:200]
             raise BrainUnavailable(self.last_error) from exc
@@ -314,7 +318,7 @@ class Brain:
         config = self._config(system, declarations, long=turn.detailed)
         contents = list(history[-HISTORY_ITEMS:])
         tags = [tag for tag, on in ((FOLLOWUP_TAG, turn.followup), (DETAIL_TAG, turn.detailed)) if on]
-        said = "\n\n".join(part for part in (turn.conversation, " ".join([*tags, turn.text])) if part)
+        said = " ".join([*tags, turn.text])
         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=said)]))
         text = ""
         for _ in range(MAX_STEPS):
@@ -352,8 +356,9 @@ class Brain:
         if turn.followup and not turn.done and turn.pending is None and (not text or text.lower().startswith(SILENT)):
             # Not meant for Jarvis: no answer, and nothing of it stays in the conversation.
             return "", list(history[-HISTORY_ITEMS:])
+        silent_action = bool(turn.done) and text.casefold().strip() == SILENT
         text = re.sub(re.escape(SILENT), "", text, flags=re.IGNORECASE).strip()
-        if not text:
+        if not text and not silent_action:
             text = "Erledigt." if turn.done else ("Das habe ich nicht verstanden." if turn.lang == "de" else "I didn't catch that.")
         if turn.offer is not None and turn.pending is None:
             question = turn.offer.question
@@ -361,7 +366,34 @@ class Brain:
                 text = f"{text.rstrip()} {question}"
                 if contents and getattr(contents[-1], "role", "") == "model":
                     contents[-1] = types.Content(role="model", parts=[types.Part.from_text(text=text)])
-        return text, contents[-HISTORY_ITEMS:]
+        # Keep complete exchanges across turns. Slicing the tool trace could
+        # start the next request with an orphaned function response.
+        remembered = text
+        if turn.done:
+            remembered += "\n[Ausgeführte Aktionen] " + ", ".join(turn.done)
+        exchange = [
+            types.Content(role="user", parts=[types.Part.from_text(text=turn.text)]),
+            types.Content(role="model", parts=[types.Part.from_text(text=remembered)]),
+        ]
+        return text, (history + exchange)[-HISTORY_ITEMS:]
+
+    async def scene_reaction(self, turn: Turn, hint: str) -> str:
+        """Interpret an unfamiliar reply without offering tools to the model."""
+        from google.genai import types
+
+        system = (
+            "Ein bereits beauftragter Szenenwechsel wartet auf eine Reaktion auf einen Hinweis. "
+            "Ordne nur die letzte Nutzeräußerung ein. ack: Der Sprecher nimmt den Hinweis eindeutig "
+            "zur Kenntnis oder möchte die Szene ausdrücklich fortsetzen. cancel: Auftrag verwerfen. "
+            "pause: ausdrücklich warten. question: eine Frage. unclear: unsicher, anderer Auftrag, "
+            "Verneinung ohne eindeutigen Bezug oder gemischte Absichten. Eine bloße Vermutung genügt nie für ack."
+        )
+        config = self._config(system)
+        config.response_mime_type = "text/x.enum"
+        config.response_schema = {"type": "STRING", "enum": ["ack", "cancel", "pause", "question", "unclear"]}
+        message = f"{turn.conversation}\nHinweis: {hint}\nNutzeräußerung: {turn.text}"
+        reply = await self.generate([types.Content(role="user", parts=[types.Part.from_text(text=message)])], config)
+        return (reply.text or "").strip()
 
     async def speak(self, turn: Turn, history: list, instruction: str) -> str:
         """One spoken sentence for a decision the server already made. No tools, so nothing runs twice."""
@@ -369,7 +401,7 @@ class Brain:
 
         config = self._config(self.system_for(turn, False), long=False)
         contents = list(history[-HISTORY_ITEMS:])
-        said = "\n\n".join(part for part in (turn.conversation, instruction, turn.text) if part)
+        said = "\n\n".join(part for part in (instruction, turn.text) if part)
         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=said)]))
         response = await self.generate(contents, config)
         return (response.text or "").strip().strip("„“\"")
@@ -458,7 +490,7 @@ class Brain:
             [types.Content(role="user", parts=[types.Part.from_text(text=query)])],
             self._config(system, search=True, long=turn.detailed),
         )
-        self.last_sources = _source_titles(response)
+        turn.search_sources = _source_titles(response)
         return (response.text or "").strip() or ("Dazu finde ich nichts." if turn.lang == "de" else "I found nothing on that.")
 
 

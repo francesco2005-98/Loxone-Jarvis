@@ -210,6 +210,15 @@ def test_offline_light_uses_main_light(setup):
     assert "nicht erreichbar" in reply
 
 
+def test_quiet_local_light_is_still_confirmed_for_remote_listeners(setup):
+    house, area, dimmer, _gate, sent = setup
+    house.settings.update({"brain.quiet_lights": True})
+    reply, done = run(house.coordinator.handle_text(AreaSession(area.id), area, "Licht an", "de", None))
+    assert done and not reply and sent == [(dimmer.uuid, "on")]
+    reply, done = run(house.coordinator.handle_text(AreaSession(area.id), area, "Licht aus", "de", None, origin="live"))
+    assert done and reply and sent[-1] == (dimmer.uuid, "off")
+
+
 def test_play_query_starts_spotify_playlist(setup):
     house, *_ = setup
     structure = parse(SAMPLE_STRUCTURE)

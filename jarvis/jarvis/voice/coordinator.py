@@ -43,7 +43,7 @@ QUIET_AFTER_SPEECH = 0.7
 # Shorter than a real command. A false wake leaves only a blip.
 MIN_COMMAND_MS = 380
 SAID_MEMORY_S = 20.0
-_SELF_CONTAINED = {"time", "date", "timer_left", "timer_cancel"}
+_EARLY_READINGS = {"time", "date", "timer_left", "status", "temp"}
 # A whole sentence that only asks Jarvis to be quiet, usually right after interrupting him.
 _HUSH = re.compile(
     r"^(?:(?:ok(?:ay)?|ja|nein|danke|bitte)[ ,]+)*"
@@ -287,18 +287,11 @@ class Coordinator:
             self._finish(run, "end")
 
     def complete(self, text: str, session: AreaSession | None = None) -> bool:
-        """True when the words so far already form an unambiguous instant command or a yes/no answer.
-
-        "Mach das Licht an" may still go on with "im Wohnzimmer", so a command
-        without a room or device name waits for the normal end of the sentence.
-        """
-        text = correct(text, self.house)
-        if session is not None and session.pending is not None and confirm.classify(text) != confirm.Answer.UNCLEAR:
-            return True
-        command = quick.parse(text)
-        if command is None:
+        """Only finish a read-only request early. Actions can still be corrected."""
+        if session is not None and (session.pending is not None or session.affair is not None):
             return False
-        return command.room is not None or command.device is not None or command.kind in _SELF_CONTAINED
+        command = quick.parse(text)
+        return command is not None and command.kind in _EARLY_READINGS
 
     async def _transcribe(self, audio: bytes):
         house = self.house
@@ -444,7 +437,7 @@ class Coordinator:
                 await self._say_line(area, run, _missed(transcript.lang or "de"), transcript.lang or "de", "", stt_ms, started)
                 return
             woke, rest = split_wake(transcript.text)
-            spoken = correct(rest if woke else transcript.text, house)
+            spoken = rest if woke else transcript.text
             if woke and not has_words(rest):
                 # Just "Jarvis": keep the conversation and listen for the command.
                 await self._listen_for_command(area, run)
@@ -460,8 +453,10 @@ class Coordinator:
                 session.reset()
                 self._phase(area.id)
                 return
-            # The reply does not wait for speaker recognition. A name that is already
-            # known is used; otherwise the answer stays neutral.
+            # Recognition runs alongside transcription. A pending decision belongs
+            # to its speaker, so use the actual recognition result for that turn.
+            if session.pending is not None or session.affair is not None:
+                await asyncio.gather(who, return_exceptions=True)
             person_id = found.get("id")
             brain_started = time.monotonic()
             # A follow-up that starts with "Jarvis" is a new command, not room talk.
@@ -507,8 +502,9 @@ class Coordinator:
                 spoke_at = time.monotonic()
                 house.speech.last_timing = {}
                 self._note_said(area.id, reply)
-                await house.speech.say(reply, transcript.lang, [area])
-                self.note_playback(session, reply, house.speech.last_heard)
+                heard = await house.speech.say(reply, transcript.lang, [area])
+                if self._fresh(run.area_id, run.gen):
+                    self.note_playback(session, reply, heard and not house.speech.interrupted_since(area.id, spoke_at))
                 self.last["timing"]["voice"] = house.speech.last_voice_ms
                 self.last["timing"].update(house.speech.last_timing)
                 house.events.publish({"type": "utterance", "utterance": self.last})
@@ -519,9 +515,10 @@ class Coordinator:
                 if not self._fresh(run.area_id, run.gen):
                     return
                 if offer is not None:
-                    await house.speech.say(offer.question, transcript.lang, [area])
+                    heard = await house.speech.say(offer.question, transcript.lang, [area])
                     if not self._fresh(run.area_id, run.gen) or house.speech.interrupted_since(area.id, spoke_at):
                         return
+                    self.note_playback(session, offer.question, heard)
             if not self._fresh(run.area_id, run.gen):
                 return
             if session.phase in (Phase.SPEAKING, Phase.THINKING) and not session.keep_talking(
@@ -532,7 +529,7 @@ class Coordinator:
                 self._phase(area.id)
             elif session.phase in (Phase.SPEAKING, Phase.THINKING):
                 seconds = float(house.settings.get("voice.followup_s"))
-                if session.pending is not None:
+                if session.pending is not None or session.affair is not None:
                     seconds = max(seconds, OFFER_FOLLOWUP_MIN)
                 session.open_followup(run.mic.id, seconds)
                 self._phase(area.id)
@@ -593,7 +590,7 @@ class Coordinator:
 
     def _blip(self, run: Run, session: AreaSession) -> bool:
         """A wake with almost no voice behind it. A yes to an open question is still a sentence."""
-        if session.pending is not None or not run.endpointer.speech_started:
+        if run.kind == "followup" or session.pending is not None or not run.endpointer.speech_started:
             return False
         return run.endpointer.speech_ms < MIN_COMMAND_MS
 
@@ -637,7 +634,6 @@ class Coordinator:
         hold: Any = None,
     ) -> tuple[str, list[str]]:
         """The spoken reply and the actions taken. An empty reply means: not meant for Jarvis, stay quiet."""
-        text = correct(text, self.house)
         if followup and session.pending is None and session.affair is None and _fragment(text):
             return "", []
         if session.affair is not None:
@@ -646,6 +642,9 @@ class Coordinator:
                 return handled
         if session.pending is not None:
             pending: Pending = session.pending  # type: ignore[assignment]
+            if pending.person_id != person_id:
+                return ("Die Rückfrage gilt der Person, die den Auftrag gegeben hat." if lang == "de"
+                        else "That question is for the person who made the request."), []
             session.pending = None
             answer = confirm.classify(text)
             if pending.kind == "offer" and answer == confirm.Answer.UNCLEAR:
@@ -662,14 +661,15 @@ class Coordinator:
             else:
                 session.pending = pending
         session.suggestion = None
-        if self._defer_bedtime(session, area, text, person_id):
+        command_text = correct(text, self.house)
+        if self._defer_bedtime(session, area, command_text, person_id):
             return await self._speak_hint(session, area, text, lang, person_id, origin, followup, hold)
         turn = Turn(
             area=area, lang=lang, text=text, person_id=person_id, origin=origin, followup=followup, detailed=wants_detail(text), hold=hold,
             conversation=self._conversation(session),
             hold_scene=session.affair.scene if session.affair and not session.affair.executed else "",
         )
-        instant = await self._quick(turn)
+        instant = await self._quick(turn, command_text)
         if instant is not None:
             if turn.pending is not None:
                 session.pending = turn.pending
@@ -680,15 +680,14 @@ class Coordinator:
         try:
             reply, history = await self.house.brain.answer(turn, session.history)
             session.history = history
-            session.last_sources = list(getattr(self.house.brain, "last_sources", None) or [])
+            if turn.search_sources is not None:
+                session.last_sources = turn.search_sources
         except BrainUnavailable as exc:
             self.house.events.log("ai", "Gemini nicht erreichbar", str(exc)[:200])
             if turn.done:
                 reply = ""
             else:
-                reply = await self._fallback(turn)
-                if followup and not turn.done:
-                    return "", []
+                reply = await self._fallback(turn, exc)
         if turn.pending is not None:
             session.pending = turn.pending
         elif turn.offer is not None:
@@ -744,27 +743,40 @@ class Coordinator:
         item = session.affair
         if item is None:
             return None
+        if item.executing:
+            return "", []
         if item.executed:
-            if affair.reaction(text) == "ack":
+            if affair.reaction(text) in ("ack", "resume"):
                 return "", []
             return None
-        if item.person_id and person_id and item.person_id != person_id:
+        if item.person_id != person_id:
+            if affair.reaction(text) in ("ack", "resume"):
+                return "", []
             return None
         if not item.hint_spoken:
+            if affair.reaction(text) in ("ack", "resume"):
+                return "", []
             return None
         kind = affair.reaction(text)
-        if kind == "unclear":
-            return None
         turn = Turn(
             area=area, lang=lang, text=text, person_id=person_id, origin=origin, followup=followup, hold=hold,
             conversation=self._conversation(session), hold_scene=item.scene,
         )
-        if item.asks_to_close and kind == "ack":
+        if kind == "unclear" and self.house.secrets.has("gemini.api_key"):
+            try:
+                kind = await self.house.brain.scene_reaction(turn, item.hint)
+            except BrainUnavailable:
+                return None
+            if session.affair is not item or item.executed or item.executing:
+                return "", []
+        if kind == "unclear":
+            return None
+        if item.asks_to_close and kind in ("ack", "resume"):
             reply = await self._wording(
                 session, turn, "Das ist keine Zustimmung, die Tür zu schließen. Die Szene startet dadurch nicht. Eine kurze Nachfrage, keine Hausaktion."
             )
             return reply, []
-        if kind == "ack" and not item.paused:
+        if kind == "resume" or (kind == "ack" and not item.paused):
             return await self._finish_affair(session, turn, text)
         if kind == "cancel":
             scene = item.scene
@@ -778,7 +790,8 @@ class Coordinator:
         try:
             reply, history = await self.house.brain.answer(turn, session.history)
             session.history = history
-            session.last_sources = list(getattr(self.house.brain, "last_sources", None) or [])
+            if turn.search_sources is not None:
+                session.last_sources = turn.search_sources
         except BrainUnavailable as exc:
             self.house.events.log("ai", "Gemini nicht erreichbar", str(exc)[:200])
             reply = "" if turn.done else await self._fallback(turn)
@@ -786,7 +799,7 @@ class Coordinator:
 
     async def _finish_affair(self, session: AreaSession, turn: Turn, text: str) -> tuple[str, list[str]]:
         item = session.affair
-        if item is None or item.executed:
+        if item is None or item.executed or item.executing:
             return "", list(turn.done)
         entry = next((e for e in self.house.catalog.entries(only_allowed=True) if e.uuid == item.entry_uuid), None)
         if entry is None:
@@ -794,11 +807,15 @@ class Coordinator:
             reply = await self._wording(session, turn, "Die Szene ist nicht mehr freigegeben. Nenne das, verabschiede dich nicht so, als sei alles erledigt.")
             return reply, []
         turn.release_scene = True
+        item.executing = True
         try:
             result = await self.house.brain.runner.execute(entry, "scene", item.scene, None, turn)
         except Exception as exc:  # noqa: BLE001
             result = {"error": str(exc)}
         item.executed = bool(result.get("ok"))
+        item.executing = False
+        if not item.executed:
+            session.affair = None
         if item.executed:
             instruction = (
                 f"Die Szene „{item.scene}“ wurde gerade genau einmal ausgeführt. "
@@ -836,9 +853,9 @@ class Coordinator:
             reply = await self._wording(session, turn, instruction)
         except BrainUnavailable as exc:
             self.house.events.log("ai", "Gemini nicht erreichbar", str(exc)[:200])
-            return await self._finish_affair(session, turn, text)
+            reply = item.hint.rstrip(".") + "."
+            _remember(session, text, reply)
         item.line = reply
-        item.hint_spoken = True
         item.asks_to_close = "schliess" in (reply or "").casefold()
         return reply, []
 
@@ -939,11 +956,11 @@ class Coordinator:
             session.pending = turn.pending
         return reply, turn.done
 
-    async def _quick(self, turn: Turn) -> str | None:
+    async def _quick(self, turn: Turn, command_text: str | None = None) -> str | None:
         """Plain commands (light, dimming, blinds, time, date) are handled at once, without Gemini."""
         if not self.house.settings.get("brain.quick"):
             return None
-        command = quick.parse(turn.text)
+        command = quick.parse(command_text or turn.text)
         if command is None:
             return None
         anrede = self._anrede(turn)
@@ -965,7 +982,8 @@ class Coordinator:
             verb = {"open": "öffnen", "close": "schließen", "stop": "anhalten", "arm": "scharf schalten", "disarm": "ausschalten"}.get(command.action, command.action)
             names = " und ".join(entry.name for entry in entries)
             question = book.pick("confirm_ask", turn.lang, anrede=anrede, wert=f"{names} {verb}", raum="")
-            turn.pending = Pending("control", question, [(entry, command.action, None, None) for entry in entries], lang=turn.lang)
+            turn.pending = Pending("control", question, [(entry, command.action, None, None) for entry in entries],
+                                   lang=turn.lang, person_id=turn.person_id)
             return question
         if command.kind == "mood":
             if turn.hold_scene and turn.hold_scene.casefold() in (command.scene or "").casefold():
@@ -986,9 +1004,16 @@ class Coordinator:
             command.action = "dim"
             command.value = levels[0]
             value = str(levels[0])
-        confirmation = quick.reply(command, room, turn.lang, anrede, True, book)
+        quiet = (
+            self.house.settings.get("brain.quiet_lights")
+            and turn.origin != "live" and command.room is None and command.scope != "house"
+            and command.kind in {"light", "dim", "kind", "named", "color", "white"}
+            and all(entry.group == "light" and entry.room in turn.area.rooms for entry in entries)
+        )
+        confirmation = "" if quiet else quick.reply(command, room, turn.lang, anrede, True, book)
         # The voice is synthesized while the Miniserver switches.
-        self.house.piper.prerender(confirmation, turn.lang)
+        if confirmation:
+            self.house.piper.prerender(confirmation, turn.lang)
         ok = True
         for index, entry in enumerate(entries):
             try:
@@ -1105,9 +1130,17 @@ class Coordinator:
         anrede = self.house.people.address(turn.person_id)[0] if turn.person_id else None
         return anrede or ANREDE_LABELS.get(self.house.settings.get("house.default_anrede"))
 
-    async def _fallback(self, turn: Turn) -> str:
+    async def _fallback(self, turn: Turn, error: BrainUnavailable | None = None) -> str:
         command = fallback.parse(turn.text)
         if command is None:
+            messages = {
+                401: ("Der Modellzugang wurde abgelehnt.", "Model access was denied."),
+                403: ("Der Modellzugang wurde abgelehnt.", "Model access was denied."),
+                404: ("Das eingestellte Modell ist nicht verfügbar.", "The configured model is unavailable."),
+                429: ("Das Anfragelimit ist erreicht.", "The request limit has been reached."),
+            }
+            if error and error.status in messages:
+                return messages[error.status][0 if turn.lang == "de" else 1]
             return self.house.phrases.pick("offline", turn.lang, anrede=self._anrede(turn))
         house = self.house
         runner = house.brain.runner
@@ -1259,7 +1292,7 @@ def _hush(text: str) -> bool:
 
 def _fragment(text: str) -> bool:
     """One stray word heard after an answer ("Hm", "Na", "Okay"): nothing to act on."""
-    return len(re.findall(r"[a-zäöüß]+", text.lower())) < 2 and quick.parse(text) is None
+    return text.strip(" .,!?:").casefold() in {"", "hm", "hmm", "äh", "ähm", "mhm"}
 
 
 def _offer_answer(text: str) -> confirm.Answer:

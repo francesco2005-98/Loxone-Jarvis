@@ -123,6 +123,7 @@ def test_a_second_word_restarts_the_pause():
 def test_confirmation_words():
     assert confirm.classify("Ja") == confirm.Answer.YES
     assert confirm.classify("Ja, bitte.") == confirm.Answer.YES
+    assert confirm.classify("Ja, aber später") == confirm.Answer.UNCLEAR
     assert confirm.classify("Mach das") == confirm.Answer.YES
     assert confirm.classify("Yes") == confirm.Answer.YES
     assert confirm.classify("Nein") == confirm.Answer.NO
@@ -138,6 +139,9 @@ def test_offline_sentences():
     assert fallback.parse("Rollläden hoch") == fallback.FallbackCommand("shade", "up")
     assert fallback.parse("lights on") == fallback.FallbackCommand("light", "on")
     assert fallback.parse("Wie wird das Wetter") is None
+    assert fallback.parse("Ist das Licht an?") is None
+    assert fallback.parse("Mach das Licht bitte nicht an") is None
+    assert fallback.parse("Mach das Licht im Büro an") is None
 
 
 def test_speaker_identification_is_conservative():
