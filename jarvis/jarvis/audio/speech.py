@@ -29,6 +29,7 @@ class Speech:
         self.last_start_latency: float | None = None
         self.last_voice_ms: int | None = None
         self.last_timing: dict[str, int] = {}
+        self.last_heard = False
 
     async def render(self, text: str, lang: str, lead_ms: int | None = None) -> wav.Pcm:
         """Lead silence protects the first syllable on the Audioserver; a browser plays it right away."""
@@ -70,6 +71,7 @@ class Speech:
         if not chosen:
             self.house.events.log("audio", "Keine Audio-Zone für die Antwort", ", ".join(a.name for a in areas))
             return False
+        self.last_heard = False
         speaking = [area for area, _ in chosen]
         locks = [self._locks.setdefault(a.id, asyncio.Lock()) for a in speaking]
         for lock in locks:
@@ -115,8 +117,10 @@ class Speech:
                     continue
                 started = time.monotonic()
                 heard = await self._wait_playback(announcement, cut, pcm, started, render_started)
-                if heard or cut.is_set():
+                if heard:
                     played = True
+                    break
+                if cut.is_set():
                     break
                 await self.house.audioserver.cut(announcement)
                 if attempt == 1:
@@ -154,7 +158,7 @@ class Speech:
                 await _until(announcement.finished, cut, pcm.duration + 5.0)
                 heard = True
             else:
-                heard = cut.is_set()
+                heard = False
         except asyncio.TimeoutError:
             heard = announcement.began.is_set()
             if heard:
@@ -166,6 +170,7 @@ class Speech:
                         pass
         if cut.is_set() and not announcement.finished.is_set():
             self.house.background(self.house.audioserver.cut(announcement), "cut announcement")
+        self.last_heard = heard
         return heard
 
 
