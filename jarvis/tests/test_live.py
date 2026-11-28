@@ -54,7 +54,8 @@ class _Fake:
         async def handle_text(session, area, text, lang, person_id, origin="", followup=False, hold=None):
             self.handled.append((text, origin))
             self.followups.append(followup)
-            return self.replies.pop(0) if self.replies else "Erledigt.", ["Licht an"]
+            reply = self.replies.pop(0) if self.replies else "Erledigt."
+            return reply, (["Licht an"] if reply else [])
 
         self.followups = []
         self.replies = []
