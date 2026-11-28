@@ -410,7 +410,7 @@ class LiveSession:
         )
         if not self._current(gen):
             return
-        if not reply:
+        if not reply and not done:
             if followup:
                 house.events.log("voice", f"Live, nicht an Jarvis: „{text}“", "Gespräch beendet")
                 await self._end()

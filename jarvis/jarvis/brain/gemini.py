@@ -147,6 +147,7 @@ class Brain:
             tools.append(types.Tool(function_declarations=[types.FunctionDeclaration(**d) for d in declarations]))
         if search:
             tools.append(types.Tool(google_search=types.GoogleSearch()))
+            tools.append(types.Tool(url_context=types.UrlContext()))
         return types.GenerateContentConfig(
             system_instruction=system,
             tools=tools or None,
@@ -288,6 +289,7 @@ class Brain:
             suggestions=house.settings.get("brain.suggestions"),
             declined=house.coordinator.declined_labels(area.id),
             zones=[f"{z.name} (Raum {z.room})" if z.room and z.room != z.name else z.name for z in house.miniserver.structure.zones()],
+            conversation=turn.conversation or None,
         )
 
     def location_line(self) -> str | None:
@@ -312,7 +314,7 @@ class Brain:
         config = self._config(system, declarations, long=turn.detailed)
         contents = list(history[-HISTORY_ITEMS:])
         tags = [tag for tag, on in ((FOLLOWUP_TAG, turn.followup), (DETAIL_TAG, turn.detailed)) if on]
-        said = " ".join([*tags, turn.text])
+        said = "\n\n".join(part for part in (turn.conversation, " ".join([*tags, turn.text])) if part)
         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=said)]))
         text = ""
         for _ in range(MAX_STEPS):
@@ -360,6 +362,17 @@ class Brain:
                 if contents and getattr(contents[-1], "role", "") == "model":
                     contents[-1] = types.Content(role="model", parts=[types.Part.from_text(text=text)])
         return text, contents[-HISTORY_ITEMS:]
+
+    async def speak(self, turn: Turn, history: list, instruction: str) -> str:
+        """One spoken sentence for a decision the server already made. No tools, so nothing runs twice."""
+        from google.genai import types
+
+        config = self._config(self.system_for(turn, False), long=False)
+        contents = list(history[-HISTORY_ITEMS:])
+        said = "\n\n".join(part for part in (turn.conversation, instruction, turn.text) if part)
+        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=said)]))
+        response = await self.generate(contents, config)
+        return (response.text or "").strip().strip("„“\"")
 
     async def due_sentence(self, timer: dict, anrede: str | None) -> str:
         """One spoken sentence for a due timer or reminder, in the configured personality."""
@@ -433,7 +446,8 @@ class Brain:
         system = (
             self.house.settings.get("gemini.system_prompt")
             + f"\nBeantworte die Frage mit der Google-Suche, auf {lang}, {length}. "
-            "Keine Aufzählungen, keine Quellenangaben, keine URLs, kein Markdown. Jetzt ist "
+            "Keine Aufzählungen und kein Markdown. Lies keine URL vor. Nenne eine Quelle nur, wenn danach gefragt wird, "
+            "und nur eine, die diese Suche wirklich geliefert hat. Jetzt ist "
             + datetime.now(self.house.settings.tz).strftime("%d.%m.%Y %H:%M")
             + "."
         )
@@ -444,6 +458,7 @@ class Brain:
             [types.Content(role="user", parts=[types.Part.from_text(text=query)])],
             self._config(system, search=True, long=turn.detailed),
         )
+        self.last_sources = _source_titles(response)
         return (response.text or "").strip() or ("Dazu finde ich nichts." if turn.lang == "de" else "I found nothing on that.")
 
 
@@ -458,6 +473,18 @@ def _spoken(calls: list, candidate: Any) -> str:
         return " ".join(replies)
     parts = getattr(candidate.content, "parts", None) or []
     return " ".join(p.text.strip() for p in parts if getattr(p, "text", None) and not getattr(p, "thought", False)).strip()
+
+
+def _source_titles(response) -> list[str]:
+    titles: list[str] = []
+    for candidate in getattr(response, "candidates", None) or []:
+        meta = getattr(candidate, "grounding_metadata", None)
+        for chunk in getattr(meta, "grounding_chunks", None) or []:
+            web = getattr(chunk, "web", None)
+            title = getattr(web, "title", None) if web is not None else None
+            if title and title not in titles:
+                titles.append(title)
+    return titles[:5]
 
 
 def _norm(text: str) -> str:

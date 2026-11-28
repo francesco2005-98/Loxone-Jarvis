@@ -26,8 +26,9 @@ _KEEP = {
     "morgen", "abend", "immer", "wieder", "noch", "auch", "einfach",
     "vielleicht", "etwas", "alles", "diese", "dieser", "dieses",
     "oder", "aber", "denn", "weil", "dass", "wenn", "dann", "hier", "dort",
-    "oben", "unten", "links", "rechts", "mach", "mache", "schalt", "schalte",
+    "oben", "unten", "links", "rechts",     "mach", "mache", "schalt", "schalte",
     "fahr", "fahre", "stell", "stelle", "dimm", "dimme", "nach", "ach",
+    "lass", "lasse", "warte", "moment",
 }
 _WORD = re.compile(r"[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-]*")
 

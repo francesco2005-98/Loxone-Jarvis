@@ -71,6 +71,10 @@ class AreaSession:
     history: list = field(default_factory=list)
     pending: object | None = None
     suggestion: object | None = None
+    affair: object | None = None
+    last_spoken: str = ""
+    last_playback: str = ""
+    last_sources: list = field(default_factory=list)
     woke_at: float = 0.0
 
     def woke(self) -> None:
@@ -186,6 +190,10 @@ class AreaSession:
         self.followup_mic = None
         self.followup_until = 0.0
         self.pending = None
+        self.affair = None
+        self.last_spoken = ""
+        self.last_playback = ""
+        self.last_sources = []
         self.history = []
 
     @property

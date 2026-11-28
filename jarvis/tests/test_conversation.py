@@ -1,37 +1,57 @@
+"""Conversation holds: the server decides the action, Gemini only the words."""
+
 import asyncio
 import json
 
-import pytest
-from fastapi.testclient import TestClient
-
-from jarvis.brain import quick
-from jarvis.brain.phrases import DEFAULT, fill
-from jarvis.brain.tools import Pending, Turn
-from jarvis.loxone.catalog import detect_light_kind
+from jarvis.brain.affair import reaction
+from jarvis.brain.gemini import BrainUnavailable
 from jarvis.loxone.protocol import Reply
-from jarvis.loxone.structure import LoxControl, parse
+from jarvis.loxone.structure import parse
 from jarvis.voice.arbitration import AreaSession
 
-from .conftest import SAMPLE_STRUCTURE
-from .test_brain_flow import FakeClient, call
-
-H = {"X-Jarvis": "1"}
+STRUCTURE = {
+    "lastModified": "2026-11-01 10:00:00",
+    "msInfo": {"serialNr": "504F00000001", "msName": "Zuhause"},
+    "rooms": {"r-wohn": {"name": "Wohnzimmer"}},
+    "cats": {"c-licht": {"name": "Beleuchtung", "type": "lights"}},
+    "controls": {
+        "lc": {
+            "name": "Licht Wohnzimmer",
+            "type": "LightControllerV2",
+            "uuidAction": "10000000-0000-0001-ffff000000000001",
+            "room": "r-wohn",
+            "cat": "c-licht",
+            "states": {"activeMoods": "s-active", "moodList": "s-moods"},
+        },
+        "door": {
+            "name": "Terrassentür",
+            "type": "Window",
+            "uuidAction": "10000000-0000-0002-ffff000000000001",
+            "room": "r-wohn",
+            "states": {"position": "s-door"},
+        },
+    },
+}
 
 
 def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-@pytest.fixture
-def home(house):
-    structure = parse(SAMPLE_STRUCTURE)
+def prepare(house, door_open=True):
+    structure = parse(STRUCTURE)
     house.miniserver.structure = structure
     house.catalog.sync(structure)
-    for entry in house.catalog.entries():
-        if entry.group in ("light", "shading", "gate"):
-            house.catalog.update(entry.short_id, allowed=True)
-    area = house.areas.create("Wohnbereich")
+    light = next(e for e in house.catalog.entries() if e.type == "LightControllerV2")
+    door = next(e for e in house.catalog.entries() if e.name == "Terrassentür")
+    house.catalog.update(light.short_id, allowed=True)
+    house.catalog.update(door.short_id, allowed=True)
+    light = house.catalog.get(light.short_id)
+    house.miniserver.texts["s-moods"] = json.dumps([{"id": 0, "name": "Aus"}, {"id": 7, "name": "Gute Nacht"}])
+    house.miniserver.values["s-door"] = 1.0 if door_open else 0.0
+    area = house.areas.create("Wohnen")
     area = house.areas.update(area.id, rooms=["Wohnzimmer"])
+    person = house.people.create("Luca", "sir", "")
     sent = []
 
     async def command(uuid, cmd):
@@ -39,210 +59,158 @@ def home(house):
         return Reply("ok", "1", 200)
 
     house.miniserver.command = command
-    house.secrets.set("gemini.api_key", "test")
-    entries = {e.name: e for e in house.catalog.entries()}
-    return house, area, entries, sent
+    house.miniserver.status = "verbunden"
+    return area, person["id"], sent, light
 
 
-# ------------------------------------------------------------------ light kind
-def test_light_kind_from_loxone_names_and_override(home):
-    house, area, entries, _ = home
-    assert entries["Indirekte Beleuchtung TV"].kind == "indirect"
-    assert entries["Deckenlicht"].kind == "direct"
-    assert entries["Rollo Terrasse"].kind == "unknown", "only lights have a light kind"
-    control = LoxControl("u", "Kreis 3", "Dimmer", None, None, None, None, None, details={"lightType": "indirect"})
-    assert detect_light_kind(control, "Kreis 3", []) == "indirect"
-    house.catalog.update(entries["Deckenlicht"].short_id, light_kind="indirect")
-    assert house.catalog.get(entries["Deckenlicht"].short_id).kind == "indirect"
+def scripted(house, lines):
+    spoken = []
+
+    async def speak(turn, history, instruction):
+        spoken.append((turn.text, instruction))
+        for needle, line in lines:
+            if needle in turn.text:
+                return line
+        return lines[-1][1]
+
+    async def answer(turn, history):
+        spoken.append((turn.text, "answer"))
+        return "Bis neun, Sir.", history
+
+    house.brain.speak = speak
+    house.brain.answer = answer
+    return spoken
 
 
-def test_prompt_groups_circuits_under_their_light_block(home):
-    house, area, entries, _ = home
-    system = house.brain.system_for(Turn(area=area, lang="de", text=""), False)
-    block = entries["Licht Wohnzimmer"]
-    line = next(l for l in system.splitlines() if l.startswith(block.short_id + " |"))
-    assert "Kreise:" in line and "[indirekt]" in line and "[direkt]" in line
-    tv = entries["Indirekte Beleuchtung TV"]
-    assert f"Lichtkreis von {block.short_id}" in next(l for l in system.splitlines() if l.startswith(tv.short_id + " |"))
+def test_reaction_reads_the_hint_without_a_phrase_book():
+    assert reaction("Ich weiß") == "ack"
+    assert reaction("Die bleibt heute offen") == "ack"
+    assert reaction("Ich weiß, wir sitzen noch draußen") == "ack"
+    assert reaction("Welche Tür?") == "question"
+    assert reaction("Regnet es denn heute Nacht?") == "question"
+    assert reaction("Warte, ich mache sie noch zu") == "pause"
+    assert reaction("Lass es für heute") == "cancel"
+    assert reaction("Was würde ich nur ohne dich tun") == "unclear"
 
 
-# ------------------------------------------------------------- instant path
-def test_named_circuit_switches_instantly(home):
-    house, area, entries, sent = home
-    house.brain._genai = lambda: (_ for _ in ()).throw(AssertionError("no Gemini"))
-    house.settings.update({"brain.suggestions": "off"})
+def test_good_night_waits_for_the_open_door_and_runs_once(house):
+    area, person, sent, light = prepare(house)
+    spoken = scripted(house, [("Gute Nacht", "Darf ich anmerken, dass die Terrassentür noch offen ist, Sir?"), ("Ich weiß", "Wie Sie wünschen. Gute Nacht.")])
     session = AreaSession(area.id)
-    reply, done = run(
-        house.coordinator.handle_text(session, area, "Mach die indirekte Beleuchtung im Wohnzimmer am Fernseher an", "de", None)
+    reply, done = run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    assert sent == []
+    assert session.affair is not None and not session.affair.executed
+    assert "Terrassentür" in reply
+    reply, done = run(house.coordinator.handle_text(session, area, "Ich weiß", "de", person))
+    assert done and sent == [(light.uuid, "changeTo/7")]
+    assert reply == "Wie Sie wünschen. Gute Nacht."
+    assert "aktiviert" not in reply.lower()
+    again, _ = run(house.coordinator.handle_text(session, area, "Ich weiß", "de", person))
+    assert again == ""
+    assert sent == [(light.uuid, "changeTo/7")]
+    assert spoken[1][0] == "Ich weiß"
+
+
+def test_the_same_words_do_not_close_a_door_that_was_explicitly_offered(house):
+    area, person, sent, _light = prepare(house)
+    scripted(house, [("Gute Nacht", "Soll ich die Tür schließen, Sir?")])
+    session = AreaSession(area.id)
+    run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    reply, done = run(house.coordinator.handle_text(session, area, "Ich weiß", "de", person))
+    assert sent == [] and done == []
+    assert session.affair is not None and not session.affair.executed and session.affair.asks_to_close
+    assert reply
+
+
+def test_a_personal_detail_changes_the_closing_not_the_action(house):
+    area, person, sent, light = prepare(house)
+    spoken = scripted(
+        house,
+        [
+            ("Gute Nacht", "Darf ich anmerken, dass die Terrassentür noch offen ist, Sir?"),
+            ("draußen", "Dann wünsche ich Ihnen noch einen schönen Abend, Sir."),
+        ],
     )
-    assert sent == [(entries["Indirekte Beleuchtung TV"].uuid, "on")]
-    assert "Wohnzimmer" in reply
-    run(house.coordinator.handle_text(session, area, "Mach das indirekte Licht im Wohnzimmer aus", "de", None))
-    assert sent[-1] == (entries["Indirekte Beleuchtung TV"].uuid, "off")
-
-
-def test_unclear_device_goes_to_gemini(home):
-    house, area, entries, _ = home
-    for text in ("Mach den Fernseher an", "Mach die Lampe im Wohnzimmer am Fenster an"):
-        command = quick.parse(text)
-        assert command is not None and quick.targets(house, area, command) == ([], None), text
-
-
-def test_mood_by_name(home):
-    house, area, entries, sent = home
-    block = entries["Licht Wohnzimmer"]
-    house.miniserver.texts["s-0002"] = json.dumps([{"id": 1, "name": "Fernsehen"}, {"id": 778, "name": "Aus"}])
-    command = quick.parse("Stimmung Fernsehen im Wohnzimmer")
-    found, room = quick.targets(house, area, command)
-    assert [e.uuid for e in found] == [block.uuid] and command.scene == "Fernsehen"
-
-
-# ------------------------------------------------------------------ offers
-def _offer_call(entries, question="Soll ich außerdem die Beschattung im Wohnzimmer herunterfahren?"):
-    return call(
-        "control",
-        actions=[{"device": entries["Indirekte Beleuchtung TV"].short_id, "action": "on"}],
-        reply="Wie Sie wünschen, Sir.",
-        offer={"question": question, "actions": [{"device": entries["Rollo Terrasse"].short_id, "action": "down"}]},
-    )
-
-
-def test_offer_then_plain_yes_runs_locally(home):
-    house, area, entries, sent = home
-    client = FakeClient([_offer_call(entries)])
-    house.brain._genai = lambda: client
     session = AreaSession(area.id)
-    reply, _ = run(house.coordinator.handle_text(session, area, "Mach das Fernsehlicht an, es wird gemütlich", "de", None))
-    assert reply == "Wie Sie wünschen, Sir. Soll ich außerdem die Beschattung im Wohnzimmer herunterfahren?"
-    assert isinstance(session.pending, Pending) and session.pending.kind == "offer"
-    reply, done = run(house.coordinator.handle_text(session, area, "Ja", "de", None))
-    assert sent[-1] == (entries["Rollo Terrasse"].uuid, "FullDown")
-    assert reply in [fill(t, anrede="Sir") for t in DEFAULT["de"]["offer_done"]]
-    assert len(client.models.calls) == 1, "the yes never reached Gemini"
+    run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    reply, done = run(house.coordinator.handle_text(session, area, "Ich weiß, wir sitzen noch draußen", "de", person))
+    assert sent == [(light.uuid, "changeTo/7")]
+    assert "Abend" in reply
+    assert "draußen" in spoken[-1][0]
 
 
-def test_no_is_remembered_and_suppresses_the_same_offer(home):
-    house, area, entries, sent = home
-    house.brain._genai = lambda: FakeClient([_offer_call(entries)])
+def test_a_question_keeps_the_scene_waiting(house):
+    area, person, sent, _light = prepare(house)
+    scripted(house, [("Gute Nacht", "Die Terrassentür ist noch offen, Sir.")])
     session = AreaSession(area.id)
-    run(house.coordinator.handle_text(session, area, "Fernsehlicht an bitte, mach es gemütlich", "de", None))
-    reply, _ = run(house.coordinator.handle_text(session, area, "Nein danke", "de", None))
-    assert reply in [fill(t, anrede="Sir") for t in DEFAULT["de"]["offer_declined"]]
-    assert all(uuid != entries["Rollo Terrasse"].uuid for uuid, _ in sent)
-    assert house.coordinator.declined(area.id, entries["Rollo Terrasse"].uuid, "down")
-    assert "Rollo Terrasse: down" in house.brain.system_for(Turn(area=area, lang="de", text=""), False)
-    house.brain._genai = lambda: FakeClient([_offer_call(entries)])
-    reply, _ = run(house.coordinator.handle_text(session, area, "Fernsehlicht nochmal an, mach es gemütlich", "de", None))
-    assert "Beschattung" not in reply and session.pending is None
+    run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    reply, done = run(house.coordinator.handle_text(session, area, "Welche Tür?", "de", person))
+    assert sent == [] and done == []
+    assert session.affair is not None and not session.affair.executed
+    assert reply
+    reply, done = run(house.coordinator.handle_text(session, area, "Regnet es denn heute Nacht?", "de", person))
+    assert sent == [] and session.affair is not None
 
 
-def test_offer_with_critical_device_is_dropped(home):
-    house, area, entries, _ = home
-    gate = entries["Garagentor"]
-    turn = Turn(area=area, lang="de", text="")
-    assert house.brain.runner.offer({"question": "Tor auf?", "actions": [{"device": gate.short_id, "action": "open"}]}, turn) is None
-    house.settings.update({"brain.suggestions": "off"})
-    rollo = entries["Rollo Terrasse"]
-    assert house.brain.runner.offer({"question": "Rollos?", "actions": [{"device": rollo.short_id, "action": "down"}]}, turn) is None
-
-
-def test_friendly_yes_words_count_for_offers(home):
-    house, area, entries, sent = home
+def test_cancel_and_another_person_do_not_run_the_scene(house):
+    area, person, sent, _light = prepare(house)
+    other = house.people.create("Gast", "mam", "")["id"]
+    scripted(house, [("Gute Nacht", "Die Terrassentür ist noch offen."), ("heute", "Dann lasse ich es für heute.")])
     session = AreaSession(area.id)
-    rollo = entries["Rollo Terrasse"]
-    session.pending = Pending("offer", "Rollos runter?", [(rollo, "down", None, None)])
-    run(house.coordinator.handle_text(session, area, "Gerne", "de", None))
-    assert sent[-1] == (rollo.uuid, "FullDown")
+    run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    run(house.coordinator.handle_text(session, area, "Ich weiß", "de", other))
+    assert sent == [] and session.affair is not None
+    reply, done = run(house.coordinator.handle_text(session, area, "Lass es für heute", "de", person))
+    assert sent == [] and done == []
+    assert session.affair is None
+    assert reply
 
 
-# ------------------------------------------------------------------ hybrid
-def test_instant_command_gets_a_background_suggestion(home):
-    house, area, entries, sent = home
-    rollo = entries["Rollo Terrasse"]
-    asked = []
-
-    async def suggest(turn):
-        asked.append(turn.done)
-        return Pending("offer", "Soll ich die Rollos herunterfahren?", [(rollo, "down", None, None)])
-
-    house.brain.suggest = suggest
+def test_a_closed_door_starts_the_scene_immediately(house):
+    area, person, sent, light = prepare(house, door_open=False)
+    spoken = scripted(house, [("x", "sollte nicht drankommen")])
     session = AreaSession(area.id)
-
-    async def scenario():
-        reply, _ = await house.coordinator.handle_text(session, area, "Mach das Deckenlicht an", "de", None)
-        offer = await house.coordinator.take_suggestion(session)
-        return reply, offer
-
-    reply, offer = run(scenario())
-    assert asked and offer is not None and session.pending is offer
-    session.pending = None
-    run(house.coordinator.handle_text(session, area, "Mach das Deckenlicht aus", "de", None))
-    assert session.suggestion is None, "cooldown: no second background question right away"
+    reply, _done = run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    assert sent == [(light.uuid, "changeTo/7")]
+    assert session.affair is None
+    assert reply
+    assert spoken == []
 
 
-def test_slow_suggestion_is_skipped(home):
-    house, area, entries, _ = home
+def test_gemini_failing_after_the_scene_stays_quiet(house):
+    area, person, sent, light = prepare(house)
 
-    async def suggest(turn):
-        await asyncio.sleep(5)
+    async def speak(turn, history, instruction):
+        if "genau einmal" in instruction:
+            raise BrainUnavailable("timeout")
+        return "Die Terrassentür ist noch offen, Sir."
 
-    house.brain.suggest = suggest
+    house.brain.speak = speak
     session = AreaSession(area.id)
-
-    async def scenario():
-        await house.coordinator.handle_text(session, area, "Mach das Deckenlicht an", "de", None)
-        return await house.coordinator.take_suggestion(session, wait=0.05)
-
-    assert run(scenario()) is None and session.pending is None
-
-
-def test_live_speaks_the_suggestion_after_the_reply(house):
-    from jarvis.voice.live import LiveSession
-
-    import numpy as np
-
-    from jarvis.audio import wav
-
-    sent = []
-
-    async def send(msg):
-        sent.append(msg)
-        if msg["type"] == "reply":
-            asyncio.get_running_loop().call_soon(session._played.set)
-
-    session = LiveSession(house, send)
-
-    async def handle_text(s, area, text, lang, person_id, origin="", followup=False, hold=None):
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
-        future.set_result(Pending("offer", "Soll ich die Rollos herunterfahren?", []))
-        s.suggestion = future
-        return "Sehr wohl, Sir.", ["Licht an"]
-
-    async def render(text, lang, **kw):
-        return wav.Pcm(np.zeros(2400, dtype="<i2"), 24000)
-
-    house.coordinator.handle_text = handle_text
-    house.coordinator._identify = lambda pcm: None
-    house.speech.render = render
-    run(session._handle("Licht an", "de", b"\0" * 3200))
-    replies = [m["text"] for m in sent if m["type"] == "reply"]
-    assert replies == ["Sehr wohl, Sir.", "Soll ich die Rollos herunterfahren?"]
-    assert session.phase == "followup"
+    run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    reply, done = run(house.coordinator.handle_text(session, area, "Ich weiß", "de", person))
+    assert sent == [(light.uuid, "changeTo/7")]
+    assert done
+    assert reply == ""
+    assert "Gemini" not in reply
 
 
-# --------------------------------------------------------------------- api
-def test_structure_download_and_light_kind_api(home):
-    house, area, entries, _ = home
-    from jarvis.main import create_app
+def test_a_new_situation_is_not_scripted_in_the_prompt(house):
+    area, person, _sent, _light = prepare(house, door_open=False)
+    captured = {}
 
-    client = TestClient(create_app(house), client=("192.168.1.5", 50000))
-    client.post("/api/setup", json={"password": "langes-passwort"}, headers=H)
-    assert client.get("/api/loxone/structure").status_code == 404
-    house.miniserver.raw_structure = {"msInfo": {"msName": "Haus", "currentUser": {"name": "jarvis"}, "serialNr": "504F"}, "controls": {}}
-    data = client.get("/api/loxone/structure").json()
-    assert data["msInfo"] == {"msName": "Haus"}
-    short = entries["Deckenlicht"].short_id
-    res = client.put(f"/api/loxone/controls/{short}", json={"light_kind": "indirect"}, headers=H).json()
-    assert res["light_kind"] == "indirect" and res["kind"] == "indirect"
-    assert client.put(f"/api/loxone/controls/{short}", json={"light_kind": "bunt"}, headers=H).status_code == 400
+    async def answer(turn, history):
+        captured["system"] = house.brain.system_for(turn, False)
+        captured["user"] = turn.conversation + "\n" + turn.text
+        return "Vermutlich selbst nachsehen, Sir.", history
+
+    house.brain.answer = answer
+    session = AreaSession(area.id)
+    session.last_spoken = "Nur noch im Flur."
+    session.last_playback = "gehört"
+    reply, done = run(house.coordinator.handle_text(session, area, "Was würde ich nur ohne dich tun, Jarvis?", "de", person))
+    assert reply.startswith("Vermutlich")
+    assert done == []
+    assert "Was würde ich nur ohne dich" not in captured["system"]
+    assert "Formuliere aus diesem Gespräch" in captured["system"]
+    assert "Nur noch im Flur" in captured["user"]

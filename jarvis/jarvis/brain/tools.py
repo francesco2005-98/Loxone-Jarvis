@@ -48,6 +48,11 @@ class Turn:
     # Spoken once when a web search is still running after a second, so the silence is not a failure.
     hold: Callable[[], Awaitable[None]] | None = None
     started: float = field(default_factory=time.monotonic)
+    # Facts about this conversation, rebuilt every turn. Not a second persona.
+    conversation: str = ""
+    # While set, a scene of this name must not run through the control tool.
+    hold_scene: str = ""
+    release_scene: bool = False
 
 
 def _schema(properties: dict, required: list[str] | None = None) -> dict:
@@ -158,7 +163,11 @@ DECLARATIONS: list[dict] = [
     },
     {
         "name": "web_search",
-        "description": "Google-Suche für Fragen außerhalb der Haussteuerung. Liefert eine fertige gesprochene Antwort.",
+        "description": (
+            "Google-Suche für Fragen außerhalb der Haussteuerung, auch „google das“, „schau nach“ und "
+            "zeitabhängige Fragen. value bzw. query ist die konkrete Frage, mit aufgelöstem Ort und Datum. "
+            "Eine URL in der Frage wird mitgelesen. Liefert die gesprochene Antwort."
+        ),
         "parameters_json_schema": _schema({"query": {"type": "string"}}, ["query"]),
     },
 ]
@@ -295,8 +304,16 @@ class ToolRunner:
     async def execute(self, entry: Entry, action: str, value: Any, value2: Any, turn: Turn | None) -> dict:
         house = self.house
         state = house.miniserver.state
-        commands = house.catalog.commands(entry, action, value, value2, state)
         action, value = house.catalog.normalize(entry, action, value, state)
+        if (
+            turn is not None
+            and turn.hold_scene
+            and not turn.release_scene
+            and action == "scene"
+            and turn.hold_scene.casefold() in str(value or "").casefold()
+        ):
+            return {"device": entry.short_id, "error": "Der Auftrag wartet noch auf die Reaktion zum Hinweis."}
+        commands = house.catalog.commands(entry, action, value, value2, state)
         for uuid, cmd in commands:
             reply = await self._send(uuid, cmd)
             if not reply.ok:
