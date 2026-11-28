@@ -98,6 +98,7 @@ def test_good_night_waits_for_the_open_door_and_runs_once(house):
     spoken = scripted(house, [("Gute Nacht", "Darf ich anmerken, dass die Terrassentür noch offen ist, Sir?"), ("Ich weiß", "Wie Sie wünschen. Gute Nacht.")])
     session = AreaSession(area.id)
     reply, done = run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    house.coordinator.note_playback(session, session.affair.line, True)
     assert sent == []
     assert session.affair is not None and not session.affair.executed
     assert "Terrassentür" in reply
@@ -116,6 +117,7 @@ def test_the_same_words_do_not_close_a_door_that_was_explicitly_offered(house):
     scripted(house, [("Gute Nacht", "Soll ich die Tür schließen, Sir?")])
     session = AreaSession(area.id)
     run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    house.coordinator.note_playback(session, session.affair.line, True)
     reply, done = run(house.coordinator.handle_text(session, area, "Ich weiß", "de", person))
     assert sent == [] and done == []
     assert session.affair is not None and not session.affair.executed and session.affair.asks_to_close
@@ -133,6 +135,7 @@ def test_a_personal_detail_changes_the_closing_not_the_action(house):
     )
     session = AreaSession(area.id)
     run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    house.coordinator.note_playback(session, session.affair.line, True)
     reply, done = run(house.coordinator.handle_text(session, area, "Ich weiß, wir sitzen noch draußen", "de", person))
     assert sent == [(light.uuid, "changeTo/7")]
     assert "Abend" in reply
@@ -144,6 +147,7 @@ def test_a_question_keeps_the_scene_waiting(house):
     scripted(house, [("Gute Nacht", "Die Terrassentür ist noch offen, Sir.")])
     session = AreaSession(area.id)
     run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    house.coordinator.note_playback(session, session.affair.line, True)
     reply, done = run(house.coordinator.handle_text(session, area, "Welche Tür?", "de", person))
     assert sent == [] and done == []
     assert session.affair is not None and not session.affair.executed
@@ -158,6 +162,7 @@ def test_cancel_and_another_person_do_not_run_the_scene(house):
     scripted(house, [("Gute Nacht", "Die Terrassentür ist noch offen."), ("heute", "Dann lasse ich es für heute.")])
     session = AreaSession(area.id)
     run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    house.coordinator.note_playback(session, session.affair.line, True)
     run(house.coordinator.handle_text(session, area, "Ich weiß", "de", other))
     assert sent == [] and session.affair is not None
     reply, done = run(house.coordinator.handle_text(session, area, "Lass es für heute", "de", person))
@@ -188,6 +193,7 @@ def test_gemini_failing_after_the_scene_stays_quiet(house):
     house.brain.speak = speak
     session = AreaSession(area.id)
     run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    house.coordinator.note_playback(session, session.affair.line, True)
     reply, done = run(house.coordinator.handle_text(session, area, "Ich weiß", "de", person))
     assert sent == [(light.uuid, "changeTo/7")]
     assert done
@@ -214,3 +220,54 @@ def test_a_new_situation_is_not_scripted_in_the_prompt(house):
     assert "Was würde ich nur ohne dich" not in captured["system"]
     assert "Formuliere aus diesem Gespräch" in captured["system"]
     assert "Nur noch im Flur" in captured["user"]
+
+
+def test_unheard_hint_and_unknown_speaker_never_release_a_scene(house):
+    area, person, sent, light = prepare(house)
+    session = AreaSession(area.id)
+
+    async def unavailable(*args):
+        raise BrainUnavailable("offline")
+
+    house.brain.speak = unavailable
+    hint, done = run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    assert "Terrassentür" in hint and not done and not sent
+    run(house.coordinator.handle_text(session, area, "Ich weiß", "de", person))
+    assert not sent
+    house.coordinator.note_playback(session, hint, True)
+    run(house.coordinator.handle_text(session, area, "Ich weiß", "de", None))
+    assert not sent
+    run(house.coordinator.handle_text(session, area, "Ich weiß", "de", person))
+    assert sent == [(light.uuid, "changeTo/7")]
+
+
+def test_short_followup_and_original_words_reach_the_brain(house, monkeypatch):
+    area, person, sent, _ = prepare(house)
+    session = AreaSession(area.id)
+    observed = []
+
+    async def answer(turn, history):
+        observed.append(turn.text)
+        return "Eine Erklärung.", history
+
+    house.brain.answer = answer
+    monkeypatch.setattr("jarvis.voice.coordinator.correct", lambda text, house: "Fehlkorrektur")
+    run(house.coordinator.handle_text(session, area, "Warum?", "de", person, followup=True))
+    assert observed == ["Warum?"] and not sent
+
+
+def test_novel_acknowledgement_uses_model_and_runs_only_the_pending_scene(house):
+    area, person, sent, light = prepare(house)
+    house.secrets.set("gemini.api_key", "test")
+    session = AreaSession(area.id)
+    scripted(house, [("Gute Nacht", "Die Tür ist offen."), ("Absicht", "Wie Sie wünschen.")])
+    hint, _ = run(house.coordinator.handle_text(session, area, "Gute Nacht", "de", person))
+    house.coordinator.note_playback(session, hint, True)
+
+    async def classify(turn, hint):
+        assert turn.text == "Das ist Absicht." and "Terrassentür" in hint
+        return "ack"
+
+    house.brain.scene_reaction = classify
+    run(house.coordinator.handle_text(session, area, "Das ist Absicht.", "de", person))
+    assert sent == [(light.uuid, "changeTo/7")]

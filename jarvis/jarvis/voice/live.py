@@ -134,6 +134,7 @@ class LiveSession:
         self.segmenter = Segmenter(int(house.settings.get("mic.noise_filter")))
         self.queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._played = asyncio.Event()
+        self._playback_ok = False
         self._stt_ms = 0
         self._early: asyncio.Task | None = None
         self._spec: tuple[tuple[int, int], asyncio.Future] | None = None
@@ -158,6 +159,7 @@ class LiveSession:
             self.area = self._resolve_area(str(message.get("area") or "") or None)
             await self.send({"type": "ready", "area": self.area.public(), "phase": self.phase})
         elif kind == "played":
+            self._playback_ok = message.get("heard", True) is True
             self._played.set()
 
     def feed(self, data: bytes) -> None:
@@ -259,13 +261,14 @@ class LiveSession:
             return None, 0.0
         return base64.b64encode(wav.encode(rendered)).decode("ascii"), rendered.duration
 
-    async def _wait_played(self, audio: str | None, duration: float) -> None:
+    async def _wait_played(self, audio: str | None, duration: float) -> bool:
         if not audio:
-            return
+            return False
         try:
             await asyncio.wait_for(self._played.wait(), timeout=duration + 4.0)
+            return self._playback_ok
         except asyncio.TimeoutError:
-            pass
+            return False
 
     async def announce(self, text: str, lang: str) -> None:
         """A timer or reminder set from this browser rings here."""
@@ -440,9 +443,10 @@ class LiveSession:
         self._played.clear()
         await self._state("speaking")
         await self.send({"type": "reply", "text": reply, "actions": done, "audio": audio})
-        await self._wait_played(audio, duration)
+        heard = await self._wait_played(audio, duration)
         if not self._current(gen):
             return
+        coordinator.note_playback(self.session, reply, heard)
         offer = await coordinator.take_suggestion(self.session)
         if not self._current(gen):
             return
@@ -450,15 +454,16 @@ class LiveSession:
             audio, duration = await self._render(offer.question, lang)
             self._played.clear()
             await self.send({"type": "reply", "text": offer.question, "actions": [], "audio": audio})
-            await self._wait_played(audio, duration)
+            heard = await self._wait_played(audio, duration)
             if not self._current(gen):
                 return
+            coordinator.note_playback(self.session, offer.question, heard)
         # A sentence already spoken during the answer stays queued. Only drop the
         # tail of this device's own voice when the user is not already talking.
         if not self.segmenter.speaking:
             self.segmenter.reset()
         seconds = float(self.house.settings.get("voice.followup_s"))
-        if self.session.pending is not None:
+        if self.session.pending is not None or self.session.affair is not None:
             seconds = max(seconds, 6.0)
         if seconds > 0 and self.session.keep_talking(float(self.house.settings.get("voice.conversation_s"))):
             await self._state("followup", time.monotonic() + seconds)

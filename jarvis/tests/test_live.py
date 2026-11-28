@@ -351,8 +351,9 @@ def _pause_then(house, text):
     return run(scenario())
 
 
-def test_a_complete_instant_command_does_not_wait_for_the_full_pause(house):
-    assert _pause_then(house, "Mach das Licht im Wohnzimmer an") == 1, "cut after 0.3 s instead of 0.55 s"
+def test_only_readings_can_finish_on_a_short_pause(house):
+    assert _pause_then(house, "Mach das Licht im Wohnzimmer an") == 0
+    assert _pause_then(house, "Wie spät ist es?") == 1
 
 
 def test_an_unfinished_sentence_waits_for_the_pause(house):
@@ -365,8 +366,8 @@ def test_room_microphones_know_when_a_sentence_is_complete(house):
     from jarvis.voice.arbitration import AreaSession
 
     coordinator = house.coordinator
-    assert coordinator.complete("Javas, mach das Licht im Wohnzimmer an")
-    assert coordinator.complete("Dimm das Licht im Wohnzimmer auf dreißig Prozent")
+    assert not coordinator.complete("Javas, mach das Licht im Wohnzimmer an")
+    assert not coordinator.complete("Dimm das Licht im Wohnzimmer auf dreißig Prozent")
     assert coordinator.complete("Wie spät ist es?")
     assert not coordinator.complete("Mach das Licht im")
     assert not coordinator.complete("Mach das Licht an"), "may still go on with the room"
@@ -374,7 +375,7 @@ def test_room_microphones_know_when_a_sentence_is_complete(house):
     session = AreaSession("a")
     assert not coordinator.complete("Ja", session)
     session.pending = Pending("control", "Tor öffnen?", [])
-    assert coordinator.complete("Ja", session), "a yes to an open question needs no longer pause"
+    assert not coordinator.complete("Ja", session), "allow a correction before confirming an action"
 
 
 def test_repeated_answers_are_spoken_from_memory(house):

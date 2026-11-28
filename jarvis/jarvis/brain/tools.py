@@ -53,6 +53,7 @@ class Turn:
     # While set, a scene of this name must not run through the control tool.
     hold_scene: str = ""
     release_scene: bool = False
+    search_sources: list[str] | None = None
 
 
 def _schema(properties: dict, required: list[str] | None = None) -> dict:

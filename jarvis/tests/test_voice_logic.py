@@ -138,6 +138,9 @@ def test_offline_sentences():
     assert fallback.parse("Rollläden hoch") == fallback.FallbackCommand("shade", "up")
     assert fallback.parse("lights on") == fallback.FallbackCommand("light", "on")
     assert fallback.parse("Wie wird das Wetter") is None
+    assert fallback.parse("Ist das Licht an?") is None
+    assert fallback.parse("Mach das Licht bitte nicht an") is None
+    assert fallback.parse("Mach das Licht im Büro an") is None
 
 
 def test_speaker_identification_is_conservative():

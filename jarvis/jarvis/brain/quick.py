@@ -272,6 +272,8 @@ def _loosen(sentence: str) -> str:
 
 
 def parse(text: str) -> QuickCommand | None:
+    if re.search(r"\b(?:nicht|außer|ausser|stattdessen|statt|doch nein|ach nein|except|instead)\b", text, re.I):
+        return None
     sentence = _loosen(_WAKE.sub("", _norm(text)).strip())
     sentence = sentence.replace("auf die hälfte", "auf 50 prozent").replace("auf die haelfte", "auf 50 prozent")
     sentence = sentence.replace("auf halb", "auf 50 prozent")
