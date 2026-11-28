@@ -123,6 +123,7 @@ def test_a_second_word_restarts_the_pause():
 def test_confirmation_words():
     assert confirm.classify("Ja") == confirm.Answer.YES
     assert confirm.classify("Ja, bitte.") == confirm.Answer.YES
+    assert confirm.classify("Ja, aber später") == confirm.Answer.UNCLEAR
     assert confirm.classify("Mach das") == confirm.Answer.YES
     assert confirm.classify("Yes") == confirm.Answer.YES
     assert confirm.classify("Nein") == confirm.Answer.NO

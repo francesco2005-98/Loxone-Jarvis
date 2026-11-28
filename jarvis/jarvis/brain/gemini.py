@@ -356,8 +356,9 @@ class Brain:
         if turn.followup and not turn.done and turn.pending is None and (not text or text.lower().startswith(SILENT)):
             # Not meant for Jarvis: no answer, and nothing of it stays in the conversation.
             return "", list(history[-HISTORY_ITEMS:])
+        silent_action = bool(turn.done) and text.casefold().strip() == SILENT
         text = re.sub(re.escape(SILENT), "", text, flags=re.IGNORECASE).strip()
-        if not text:
+        if not text and not silent_action:
             text = "Erledigt." if turn.done else ("Das habe ich nicht verstanden." if turn.lang == "de" else "I didn't catch that.")
         if turn.offer is not None and turn.pending is None:
             question = turn.offer.question

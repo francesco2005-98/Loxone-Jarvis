@@ -453,8 +453,10 @@ class Coordinator:
                 session.reset()
                 self._phase(area.id)
                 return
-            # The reply does not wait for speaker recognition. A name that is already
-            # known is used; otherwise the answer stays neutral.
+            # Recognition runs alongside transcription. A pending decision belongs
+            # to its speaker, so use the actual recognition result for that turn.
+            if session.pending is not None or session.affair is not None:
+                await asyncio.gather(who, return_exceptions=True)
             person_id = found.get("id")
             brain_started = time.monotonic()
             # A follow-up that starts with "Jarvis" is a new command, not room talk.
@@ -640,6 +642,9 @@ class Coordinator:
                 return handled
         if session.pending is not None:
             pending: Pending = session.pending  # type: ignore[assignment]
+            if pending.person_id != person_id:
+                return ("Die Rückfrage gilt der Person, die den Auftrag gegeben hat." if lang == "de"
+                        else "That question is for the person who made the request."), []
             session.pending = None
             answer = confirm.classify(text)
             if pending.kind == "offer" and answer == confirm.Answer.UNCLEAR:
@@ -977,7 +982,8 @@ class Coordinator:
             verb = {"open": "öffnen", "close": "schließen", "stop": "anhalten", "arm": "scharf schalten", "disarm": "ausschalten"}.get(command.action, command.action)
             names = " und ".join(entry.name for entry in entries)
             question = book.pick("confirm_ask", turn.lang, anrede=anrede, wert=f"{names} {verb}", raum="")
-            turn.pending = Pending("control", question, [(entry, command.action, None, None) for entry in entries], lang=turn.lang)
+            turn.pending = Pending("control", question, [(entry, command.action, None, None) for entry in entries],
+                                   lang=turn.lang, person_id=turn.person_id)
             return question
         if command.kind == "mood":
             if turn.hold_scene and turn.hold_scene.casefold() in (command.scene or "").casefold():
